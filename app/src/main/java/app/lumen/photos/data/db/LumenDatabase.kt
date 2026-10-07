@@ -206,6 +206,9 @@ interface FaceDao {
     @Query("DELETE FROM persons WHERE id = :id")
     suspend fun deletePerson(id: Long)
 
+    @Query("UPDATE persons SET hidden = :hidden WHERE id IN (:ids)")
+    suspend fun setHidden(ids: List<Long>, hidden: Boolean)
+
     @Query("DELETE FROM persons WHERE modelId = :modelId AND name IS NULL AND id NOT IN (SELECT DISTINCT personId FROM faces WHERE confirmed = 1 AND personId IS NOT NULL)")
     suspend fun deleteUnnamedPersons(modelId: String)
 

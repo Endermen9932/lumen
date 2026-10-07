@@ -1,8 +1,10 @@
 package app.lumen.photos.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
@@ -83,15 +85,29 @@ private fun schemeFromSeed(seed: Long, dark: Boolean): ColorScheme {
     }
 }
 
+/**
+ * True black for everything that forms the app's surfaces (pages, bars, sheets, cards, tonal
+ * overlays) so OLED pixels stay off. Only controls that need to stand out from the page – the
+ * search field, chips, image placeholders – keep a barely visible dark grey.
+ */
 private fun ColorScheme.amoled(): ColorScheme = copy(
     background = Color.Black,
     surface = Color.Black,
+    surfaceDim = Color.Black,
+    surfaceTint = Color.Black,
     surfaceContainerLowest = Color.Black,
-    surfaceContainerLow = Color(0xFF0B0B0D),
-    surfaceContainer = Color(0xFF111114),
-    surfaceContainerHigh = Color(0xFF18181C),
-    surfaceContainerHighest = Color(0xFF212126),
+    surfaceContainerLow = Color.Black,
+    surfaceContainer = Color.Black,
+    surfaceContainerHigh = Color(0xFF141416),
+    surfaceContainerHighest = Color(0xFF1E1E22),
+    surfaceBright = Color(0xFF1E1E22),
+    surfaceVariant = Color(0xFF1E1E22),
 )
+
+/** Cards on a pure black page need a hairline to stay visible. */
+@Composable
+fun cardOutline(container: Color): BorderStroke? =
+    if (container == Color.Black) BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null
 
 private val LumenTypography: Typography
     get() {

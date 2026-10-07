@@ -85,6 +85,7 @@ fun PersonScreen(personId: Long) {
     var columns by remember { mutableIntStateOf(3) }
     var rename by remember { mutableStateOf(false) }
     var mergeDialog by remember { mutableStateOf(false) }
+    var coverPicker by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val cover by produceState<FaceEntity?>(null, entity?.coverFaceId) { value = entity?.coverFaceId?.let { c.faces.face(it) } }
     val coverItem = remember(cover, media) { cover?.let { f -> media.firstOrNull { it.id == f.mediaId } } }
@@ -108,6 +109,7 @@ fun PersonScreen(personId: Long) {
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Mehr") }
                             DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Bild ändern") }, onClick = { menu = false; coverPicker = true })
                                 DropdownMenuItem(text = { Text("Mit anderer Person zusammenführen") }, onClick = { menu = false; mergeDialog = true })
                                 DropdownMenuItem(
                                     text = { Text(if (entity?.hidden == true) "Wieder anzeigen" else "Ausblenden") },
@@ -131,11 +133,16 @@ fun PersonScreen(personId: Long) {
             header = {
                 Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     val shape = PortraitShapes[(personId % PortraitShapes.size).toInt()].toShape()
-                    FaceImage(if (cover != null && coverItem != null) cover!!.crop(coverItem.uri, 480) else null, shape, Modifier.size(150.dp))
+                    FaceImage(
+                        if (cover != null && coverItem != null) cover!!.crop(coverItem.uri, 480) else null,
+                        shape,
+                        Modifier.size(150.dp).clickable { coverPicker = true }
+                    )
+                    TextButton(onClick = { coverPicker = true }) { Text("Bild ändern") }
                     Text(
                         entity?.name ?: "Wer ist das?",
                         style = MaterialTheme.typography.headlineMedium,
-                        modifier = Modifier.padding(top = 14.dp).clickable { rename = true }
+                        modifier = Modifier.clickable { rename = true }
                     )
                     Text("${Format.count(items.size)} Fotos", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -156,6 +163,18 @@ fun PersonScreen(personId: Long) {
                     )
                 }
             },
+        )
+    }
+
+    if (coverPicker) {
+        CoverPickerSheet(
+            personId = personId,
+            currentFaceId = entity?.coverFaceId,
+            onPick = { face ->
+                coverPicker = false
+                scope.launch { c.faces.setCover(personId, face.id) }
+            },
+            onDismiss = { coverPicker = false }
         )
     }
 

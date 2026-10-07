@@ -79,7 +79,7 @@ fun HomeScreen() {
                     0 -> TimelineTab(timelineState, onSelectionModeChange = { hideBar = it })
                     1 -> AlbumsTab()
                     2 -> SearchTab(onSelectionModeChange = { hideBar = it })
-                    3 -> PeopleTab()
+                    3 -> PeopleTab(onSelectionModeChange = { hideBar = it })
                     else -> ToolsTab()
                 }
             }

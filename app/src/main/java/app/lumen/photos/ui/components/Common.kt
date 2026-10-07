@@ -140,6 +140,7 @@ fun ActionCard(
         onClick = onClick,
         shape = RoundedCornerShape(24.dp),
         color = container,
+        border = app.lumen.photos.ui.theme.cardOutline(container),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

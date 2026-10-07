@@ -34,6 +34,8 @@ Pixel 10 Pro (Tensor G5, 16 GB RAM) – **ohne Google-Play-Dienste** und ohne Cl
 - Drei Qualitätsstufen: Schnell (buffalo_s, 16 MB), Ausgewogen (buffalo_l, 191 MB), Sehr gut (antelopev2, 278 MB)
 - „Fotos prüfen“: bis zu 50 unsichere Treffer im Tinder-Stil wischen (rechts = ja, links = nein, Rückgängig)
 - Suche nach Namen, auch kombiniert: „Paul“, „Paul Anna“, „Paul am Strand“
+- Personenbild frei wählbar („Bild ändern“ auf der Personenseite)
+- Mehrere Personen gleichzeitig auswählen (lang drücken oder „Alle auswählen“) und auf einmal ausblenden
 - Namen hängen an der Person, nicht an der Datei – Komprimieren oder Neu-Scannen verliert nichts
 
 **Backup**
@@ -55,6 +57,7 @@ Pixel 10 Pro (Tensor G5, 16 GB RAM) – **ohne Google-Play-Dienste** und ohne Cl
 - Einmaliger Download von Hugging Face (oder manueller Datei-Import), danach komplett offline
 - Eigener Tokenizer in Kotlin (CLIP-BPE & Gemma/SentencePiece), getestet gegen Hugging Face
 - Indexierung im Hintergrund, fortsetzbar, optional nur beim Laden; Index in Room (fp16)
+- Suche nach Datum, auch kombiniert mit Text/Personen: „März 2024“, „12.03.2024“, „Strand Juli 2023“, „gestern“, „letzte Woche“
 - Suche nach Text, „Ähnliche Fotos“, Entdecken-Kategorien, **ähnliche Serien & exakte Duplikate**
 - Während Indexierung/Komprimierung bleibt das Display an, wird aber gedimmt (abschaltbar)
 

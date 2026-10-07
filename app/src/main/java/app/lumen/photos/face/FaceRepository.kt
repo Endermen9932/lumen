@@ -283,6 +283,13 @@ class FaceRepository(
         dao.upsertPerson(PersonEntity(p.id, p.modelId, p.name, hidden, p.centroid, p.faceCount, p.coverFaceId))
     }
 
+    /** Hides (or shows again) several persons at once. */
+    suspend fun setHidden(personIds: Collection<Long>, hidden: Boolean) {
+        if (personIds.isEmpty()) return
+        // SQLite limits the number of bound variables, so very large selections go in chunks.
+        personIds.chunked(500).forEach { dao.setHidden(it, hidden) }
+    }
+
     suspend fun setCover(personId: Long, faceId: Long) {
         val p = dao.person(personId) ?: return
         dao.upsertPerson(PersonEntity(p.id, p.modelId, p.name, p.hidden, p.centroid, p.faceCount, faceId))
