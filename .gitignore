@@ -15,3 +15,9 @@ build/
 
 # Fixed Android debug key, committed so CI builds keep the same signature.
 !signing/debug.keystore
+
+# Desktop app (Lumen Indexer)
+__pycache__/
+.pytest_cache/
+/desktop/.venv/
+/dist/

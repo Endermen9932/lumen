@@ -13,6 +13,7 @@ import app.lumen.photos.data.db.LumenDatabase
 import app.lumen.photos.data.media.MediaItem
 import app.lumen.photos.data.media.MediaRepository
 import app.lumen.photos.data.settings.SettingsRepository
+import app.lumen.photos.work.IndexImportWorker
 import app.lumen.photos.work.IndexWorker
 import app.lumen.photos.work.ModelDownloadWorker
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -46,6 +48,32 @@ data class IndexProgress(
     val modelId: String?,
     val state: WorkInfo.State,
     val attempts: Int,
+)
+
+/** Outcome of an import of a ".lumenindex" file made on the PC. */
+data class ImportResult(
+    val modelId: String,
+    /** Photos that got a vector from the file. */
+    val imported: Int,
+    /** Photos in the file that already had a vector on the phone. */
+    val alreadyIndexed: Int,
+    /** Of [imported]: matched by name only because the file size had changed. */
+    val byName: Int,
+    val inFile: Int,
+    val onPhone: Int,
+    /** Photos on the phone that are not in the file (they are indexed on the phone as usual). */
+    val unmatched: Int,
+)
+
+data class ImportStatus(
+    val id: java.util.UUID,
+    val running: Boolean,
+    val done: Int,
+    val total: Int,
+    /** [IndexImportWorker.STAGE_MATCH] or [IndexImportWorker.STAGE_WRITE]. */
+    val stage: Int,
+    val result: ImportResult?,
+    val error: String?,
 )
 
 data class SearchResult(
@@ -95,6 +123,36 @@ class AiRepository(
                 attempts = info.runAttemptCount,
             )
         }
+
+    private val seenImports = MutableStateFlow<Set<java.util.UUID>>(emptySet())
+
+    /** Running import, or the finished one until the user dismisses its result. */
+    val importStatus: Flow<ImportStatus?> = combine(
+        workManager.getWorkInfosForUniqueWorkFlow(IndexImportWorker.NAME),
+        seenImports,
+    ) { infos, seen ->
+        val info = infos.firstOrNull { !it.state.isFinished }
+            ?: infos.firstOrNull { it.state != WorkInfo.State.CANCELLED && it.id !in seen }
+            ?: return@combine null
+        val out = info.outputData
+        ImportStatus(
+            id = info.id,
+            running = !info.state.isFinished,
+            done = info.progress.getInt(IndexImportWorker.KEY_DONE, 0),
+            total = info.progress.getInt(IndexImportWorker.KEY_TOTAL, 0),
+            stage = info.progress.getInt(IndexImportWorker.KEY_STAGE, IndexImportWorker.STAGE_MATCH),
+            result = if (info.state == WorkInfo.State.SUCCEEDED) ImportResult(
+                modelId = out.getString(IndexImportWorker.KEY_MODEL) ?: "",
+                imported = out.getInt(IndexImportWorker.KEY_IMPORTED, 0),
+                alreadyIndexed = out.getInt(IndexImportWorker.KEY_SKIPPED, 0),
+                byName = out.getInt(IndexImportWorker.KEY_BY_NAME, 0),
+                inFile = out.getInt(IndexImportWorker.KEY_IN_FILE, 0),
+                onPhone = out.getInt(IndexImportWorker.KEY_ON_PHONE, 0),
+                unmatched = out.getInt(IndexImportWorker.KEY_UNMATCHED, 0),
+            ) else null,
+            error = if (info.state == WorkInfo.State.FAILED) out.getString(IndexImportWorker.KEY_ERROR) ?: "Import fehlgeschlagen." else null,
+        )
+    }
 
     /** Map of modelId to download progress (0..1) for running downloads. */
     val downloads: Flow<Map<String, Float>> = workManager.getWorkInfosByTagFlow(ModelDownloadWorker.TAG)
@@ -197,6 +255,25 @@ class AiRepository(
             if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             BackgroundJobs.request(IndexWorker::class.java, s.indexOnlyWhileCharging)
         )
+    }
+
+    /** Imports a ".lumenindex" file (made by the desktop app) in the background. */
+    fun importIndex(uri: android.net.Uri) {
+        val request = OneTimeWorkRequestBuilder<IndexImportWorker>()
+            .setInputData(workDataOf(IndexImportWorker.KEY_URI to uri.toString()))
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .build()
+        workManager.enqueueUniqueWork(IndexImportWorker.NAME, ExistingWorkPolicy.REPLACE, request)
+    }
+
+    fun dismissImportResult(id: java.util.UUID) {
+        seenImports.value = seenImports.value + id
+    }
+
+    /** The database changed behind the in-memory index's back: reload it if it shows [model]. */
+    suspend fun onIndexImported(model: AiModel) {
+        if (index.loadedModel == model.id) index.invalidate()
+        if (activeModel.value == model && models.isInstalled(model)) index.ensureLoaded(model.id)
     }
 
     fun cancelIndexing() {

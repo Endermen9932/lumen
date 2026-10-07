@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Lumen Indexer
+GenericName=KI-Indexierung für Lumen Photos
+Comment=Berechnet den KI-Suchindex der Lumen-Fotos-App auf dem PC – viel schneller als auf dem Handy
+Exec=lumen-indexer gui
+Icon=lumen-indexer
+Terminal=false
+Categories=Graphics;Photography;Utility;GTK;
+Keywords=Fotos;KI;Index;Suche;Lumen;
+StartupWMClass=app.lumen.indexer

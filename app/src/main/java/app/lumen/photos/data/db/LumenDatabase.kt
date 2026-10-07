@@ -43,6 +43,10 @@ interface EmbeddingDao {
     @Query("SELECT mediaId, dateModified FROM embeddings WHERE modelId = :modelId")
     suspend fun keys(modelId: String): List<EmbeddingKey>
 
+    /** Like [keys], but only photos that really have a vector (not the ones that failed locally). */
+    @Query("SELECT mediaId, dateModified FROM embeddings WHERE modelId = :modelId AND length(vector) > 0")
+    suspend fun indexedKeys(modelId: String): List<EmbeddingKey>
+
     @Query("SELECT * FROM embeddings WHERE modelId = :modelId AND length(vector) > 0 ORDER BY mediaId LIMIT :limit OFFSET :offset")
     suspend fun page(modelId: String, limit: Int, offset: Int): List<EmbeddingEntity>
 

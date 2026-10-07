@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.Language
@@ -65,10 +66,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.lumen.photos.ai.AiModel
+import app.lumen.photos.ai.ImportResult
+import app.lumen.photos.ai.ImportStatus
 import app.lumen.photos.ai.IndexProgress
 import app.lumen.photos.ai.ModelCatalog
 import app.lumen.photos.container
 import app.lumen.photos.work.BackgroundJobs
+import app.lumen.photos.work.IndexImportWorker
 import app.lumen.photos.ui.components.BackButton
 import app.lumen.photos.ui.components.Dots
 import app.lumen.photos.ui.components.Format
@@ -93,6 +97,15 @@ fun ModelsScreen() {
     val indexable = remember(media, settings.indexVideos) { media.count { settings.indexVideos || it.isImage } }
     var confirmDelete by remember { mutableStateOf<AiModel?>(null) }
     var importTarget by remember { mutableStateOf<AiModel?>(null) }
+
+    val importStatus by c.ai.importStatus.collectAsStateWithLifecycle(initialValue = null)
+    val indexFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            // Keep read access in case Android stops the process while the import runs.
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            c.ai.importIndex(uri)
+        }
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val model = importTarget ?: return@rememberLauncherForActivityResult
@@ -123,6 +136,12 @@ fun ModelsScreen() {
                     onStart = { scope.launch { c.ai.resumeIndexing() } },
                     onPause = { scope.launch { c.ai.pauseIndexing() } },
                     onReset = { active?.let { m -> scope.launch { c.ai.clearIndex(m); c.ai.resumeIndexing() } } },
+                )
+            }
+            item {
+                PcImportCard(
+                    status = importStatus,
+                    onPick = { indexFileLauncher.launch(arrayOf("*/*")) },
                 )
             }
             item {
@@ -161,6 +180,12 @@ fun ModelsScreen() {
                 app.lumen.photos.ui.screens.people.FaceModelsSection()
             }
         }
+    }
+
+    importStatus?.takeIf { !it.running }?.let { status ->
+        ImportResultDialog(status, installed = installed, active = active?.id, onActivate = { id ->
+            ModelCatalog.byId(id)?.let { m -> scope.launch { c.ai.setActiveModel(m) } }
+        }, onDismiss = { c.ai.dismissImportResult(status.id) })
     }
 
     confirmDelete?.let { model ->
@@ -369,4 +394,103 @@ private fun Fact(icon: ImageVector, text: String) {
             Text(text, style = MaterialTheme.typography.labelMedium)
         }
     }
+}
+
+@Composable
+private fun PcImportCard(status: ImportStatus?, onPick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth().animateContentSize()
+    ) {
+        Column(Modifier.padding(22.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShapeIcon(
+                    Icons.Outlined.Computer,
+                    shape = MaterialShapes.Cookie6Sided.toShape(),
+                    container = MaterialTheme.colorScheme.secondary,
+                    content = MaterialTheme.colorScheme.onSecondary,
+                    size = 56.dp,
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Indexierung vom PC", style = MaterialTheme.typography.titleLarge)
+                    Text("Viel schneller als auf dem Handy", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            val running = status?.takeIf { it.running }
+            if (running != null) {
+                val fraction = if (running.total > 0) (running.done.toFloat() / running.total).coerceIn(0f, 1f) else 0f
+                LinearWavyProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+                Text(
+                    if (running.stage == IndexImportWorker.STAGE_MATCH) "Fotos werden zugeordnet …"
+                    else "${Format.count(running.done)} von ${Format.count(running.total)} Fotos aus der Datei gelesen",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            } else {
+                Text(
+                    "Kopiere die Fotos auf einen Ubuntu-PC, lass sie dort mit der Desktop-App „Lumen Indexer“ " +
+                        "analysieren und wähle hier die exportierte .lumenindex-Datei. Die Fotos auf dem Handy " +
+                        "werden über Dateiname und Größe zugeordnet – nichts muss neu berechnet werden.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onPick, shapes = ButtonDefaults.shapes()) {
+                    Icon(Icons.Outlined.FileOpen, null); Text(" Datei importieren")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportResultDialog(status: ImportStatus, installed: Set<String>, active: String?, onActivate: (String) -> Unit, onDismiss: () -> Unit) {
+    val result: ImportResult? = status.result
+    if (result == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Import nicht möglich") },
+            text = { Text(status.error ?: "Import fehlgeschlagen.") },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } }
+        )
+        return
+    }
+    val model = ModelCatalog.byId(result.modelId)
+    val modelReady = model != null && model.id in installed
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (result.imported > 0) "Indexierung importiert" else "Nichts zu importieren") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${Format.count(result.imported)} von ${Format.count(result.onPhone)} Fotos auf dem Handy haben jetzt " +
+                        "einen Suchindex (${model?.name ?: result.modelId}). Die Datei enthielt ${Format.count(result.inFile)} Fotos."
+                )
+                if (result.alreadyIndexed > 0) Text("${Format.count(result.alreadyIndexed)} waren schon indexiert und blieben unverändert.")
+                if (result.byName > 0) Text("${Format.count(result.byName)} Fotos wurden nur über den Dateinamen zugeordnet (Größe war anders, z. B. nach dem Komprimieren).")
+                if (result.unmatched > 0) Text("${Format.count(result.unmatched)} Fotos auf dem Handy waren nicht in der Datei – sie werden wie gewohnt auf dem Handy indexiert.")
+                if (result.imported == 0 && result.alreadyIndexed == 0) {
+                    Text("Es passte kein Foto: Dateiname und Größe müssen mit denen auf dem Handy übereinstimmen. Wurde der richtige Ordner indexiert?")
+                }
+                if (!modelReady && model != null) {
+                    Text("Zum Suchen fehlt noch das Modell ${model.name} – lade es weiter unten herunter. Der Index bleibt erhalten.")
+                } else if (model != null && active != model.id) {
+                    Text("${model.name} ist noch nicht das aktive Modell. Wechsle dazu, um mit diesem Index zu suchen.")
+                }
+            }
+        },
+        confirmButton = {
+            if (model != null && modelReady && active != model.id) {
+                Button(onClick = { onActivate(model.id); onDismiss() }) { Text("${model.tier} verwenden") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("OK") }
+            }
+        },
+        dismissButton = if (model != null && modelReady && active != model.id) {
+            { TextButton(onClick = onDismiss) { Text("Später") } }
+        } else null
+    )
 }

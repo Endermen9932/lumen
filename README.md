@@ -38,6 +38,13 @@ Pixel 10 Pro (Tensor G5, 16 GB RAM) – **ohne Google-Play-Dienste** und ohne Cl
 - Mehrere Personen gleichzeitig auswählen (lang drücken oder „Alle auswählen“) und auf einmal ausblenden
 - Namen hängen an der Person, nicht an der Datei – Komprimieren oder Neu-Scannen verliert nichts
 
+**KI-Indexierung am PC (Ubuntu 24.04)**
+- Die Desktop-App **Lumen Indexer** (`.deb` bei jedem Release, Quellcode in [`desktop/`](desktop/README.md)) berechnet den
+  KI-Suchindex auf dem PC – mit allen sechs Modellen, allen CPU-Kernen und paralleler Bilddekodierung
+- Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren, **`.lumenindex`-Datei exportieren**
+- In der App unter KI-Modelle → **Indexierung vom PC** importieren: Zuordnung über Dateiname + Größe, bereits
+  indexierte Fotos bleiben unverändert, der Rest wird weiter auf dem Handy indexiert
+
 **Backup**
 - Inkrementelles Backup der ganzen Galerie in einen frei wählbaren Ordner (USB-Stick, SD-Karte,
   Nextcloud/NAS über den Android-Dateimanager), Ordnerstruktur bleibt erhalten

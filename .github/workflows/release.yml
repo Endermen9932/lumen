@@ -1,4 +1,4 @@
-name: Build & Release APK
+name: Build & Release
 
 on:
   push:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -81,6 +81,42 @@ jobs:
             ${{ steps.apk.outputs.file }}
             ${{ steps.apk.outputs.debugfile }}
 
+      # Desktop app for Ubuntu 24.04 ("Lumen Indexer"): tests, .deb build and an install smoke test.
+      # A failure here must not block the APK release – the run is marked failed at the end instead.
+      - name: Desktop app (.deb)
+        id: deb
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          VERSION="1.0.${{ github.run_number }}"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-venv python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 xvfb
+          /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/test-venv"
+          "$RUNNER_TEMP/test-venv/bin/pip" install -q -r desktop/requirements.txt pytest
+          (cd desktop && "$RUNNER_TEMP/test-venv/bin/python" -m pytest -q tests)
+
+          desktop/packaging/build_deb.sh "$VERSION" dist
+          sudo apt-get install -y -qq "./dist/lumen-indexer_${VERSION}_amd64.deb"
+
+          # Smoke test of the installed package: version, window, and a real indexing run with the
+          # smallest model (downloaded from Hugging Face) including export.
+          lumen-indexer --version | grep -q "$VERSION"
+          xvfb-run -a /opt/lumen-indexer/venv/bin/python -I -c "
+          import sys
+          from gi.repository import GLib
+          from lumen_indexer import gui
+          app = gui.App()
+          app.connect('activate', lambda a: GLib.timeout_add(1500, a.quit))
+          sys.exit(app.run(None))"
+          export LUMEN_INDEXER_HOME="$RUNNER_TEMP/lumen-home"
+          mkdir -p "$RUNNER_TEMP/photos/Camera"
+          /opt/lumen-indexer/venv/bin/python -I -c "
+          from PIL import Image
+          for i in range(4):
+              Image.new('RGB', (800, 600), (40 * i, 90, 160)).save(f'$RUNNER_TEMP/photos/Camera/PXL_2024031{i}_120000.jpg')"
+          lumen-indexer index "$RUNNER_TEMP/photos" -m mobileclip-s0 -o "$RUNNER_TEMP/index.lumenindex"
+          lumen-indexer inspect "$RUNNER_TEMP/index.lumenindex" | grep -q "4 Einträge"
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -91,6 +127,7 @@ jobs:
           files: |
             ${{ steps.apk.outputs.file }}
             ${{ steps.apk.outputs.debugfile }}
+            dist/lumen-indexer_*.deb
           body: |
             **Lumen Photos ${{ steps.apk.outputs.version }}** – Offline-Galerie für das Pixel 10 Pro, ohne Google-Dienste.
 
@@ -98,10 +135,22 @@ jobs:
             - Speicher optimieren: ganze Galerie auf Full HD skalieren, Qualitätsstufen mit Vorher/Nachher-Vorschau, Ultra HDR & EXIF bleiben erhalten
             - KI-Suche komplett offline (MobileCLIP / SigLIP 2, 6 Stufen von „Blitz“ bis „Maximum“)
             - Duplikate & ähnliche Serien, Erinnerungen, Editor, Video-Player, Papierkorb
+            - **Neu:** KI-Indexierung am PC – mit der Ubuntu-App „Lumen Indexer“ berechnen und in der App importieren (KI-Modelle → Indexierung vom PC)
 
             **Dateien** (beide mit dem Android-Debug-Key signiert, lassen sich übereinander installieren):
             - `Lumen-v${{ steps.apk.outputs.version }}.apk` – optimierter Build (R8), empfohlen
             - `Lumen-v${{ steps.apk.outputs.version }}-debug.apk` – Debug-Build (debuggable, langsamer)
 
             Installation: APK auf dem Pixel öffnen und „Unbekannte Apps installieren“ erlauben.
+
+            **Lumen Indexer für Ubuntu 24.04** – `lumen-indexer_${{ steps.apk.outputs.version }}_amd64.deb`:
+            `sudo apt install ./lumen-indexer_${{ steps.apk.outputs.version }}_amd64.deb`
+            Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren, `.lumenindex`-Datei exportieren und in Lumen importieren.
+
             Build aus `main` @ ${{ env.RELEASE_SHA }} – enthält alle bisherigen Änderungen.
+
+      - name: Fail the run if the .deb is missing
+        if: steps.deb.outcome != 'success'
+        run: |
+          echo "::error::The desktop .deb could not be built or failed its smoke test (the APK release was published without it)."
+          exit 1
