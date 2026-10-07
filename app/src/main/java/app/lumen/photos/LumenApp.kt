@@ -9,7 +9,6 @@ import app.lumen.photos.data.backup.DevBackup
 import app.lumen.photos.data.db.LumenDatabase
 import app.lumen.photos.data.media.MediaRepository
 import app.lumen.photos.data.settings.SettingsRepository
-import app.lumen.photos.edit.ToolRepository
 import app.lumen.photos.face.FaceRepository
 import app.lumen.photos.optimize.ImageOptimizer
 import app.lumen.photos.optimize.VideoCompressor
@@ -51,7 +50,6 @@ class AppContainer(context: Context) {
     val videoCompressor = VideoCompressor(context, db.optimized())
     val faces = FaceRepository(context, db.faces(), settings, models, media, scope)
     val lists = MediaListRegistry()
-    val tools = ToolRepository(context, settings, models, media, scope)
     val devBackup = DevBackup(context, this)
 }
 

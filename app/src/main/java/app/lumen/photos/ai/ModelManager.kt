@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import app.lumen.photos.edit.ToolModelCatalog
 import app.lumen.photos.face.FaceModelCatalog
 import java.io.File
 import java.io.FileOutputStream
@@ -50,7 +49,7 @@ class ModelManager(private val context: Context) {
 
     fun diskUsage(model: DownloadableModel): Long = dir(model).listFiles()?.sumOf { it.length() } ?: 0L
 
-    private fun scanInstalled(): Set<String> = (ModelCatalog.models + FaceModelCatalog.models + ToolModelCatalog.models).filter { isInstalled(it) }.map { it.id }.toSet()
+    private fun scanInstalled(): Set<String> = (ModelCatalog.models + FaceModelCatalog.models).filter { isInstalled(it) }.map { it.id }.toSet()
 
     fun refresh() {
         _installed.value = scanInstalled()

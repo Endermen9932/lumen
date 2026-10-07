@@ -120,12 +120,6 @@ fun SettingsScreen() {
 
             SectionTitle("KI & Suche")
             ListItem(
-                headlineContent = { Text("KI-Modelle") },
-                supportingContent = { Text("Suche, Gesichter, Hochskalieren, Objekte entfernen und Hintergrund – Modelle laden und Qualität wählen") },
-                trailingContent = { TextButton(onClick = { nav.models() }) { Text("Öffnen") } },
-                modifier = Modifier.clickable { nav.models() }
-            )
-            ListItem(
                 headlineContent = { Text("CPU-Threads: ${s.aiThreads}") },
                 supportingContent = {
                     Column {

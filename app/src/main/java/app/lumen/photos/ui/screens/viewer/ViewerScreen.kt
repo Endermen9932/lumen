@@ -30,8 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.AutoFixHigh
-import androidx.compose.material.icons.outlined.Hd
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -104,7 +102,6 @@ fun ViewerScreen(source: String, startId: Long) {
 
     var chrome by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf<MediaItem?>(null) }
-    var upscale by remember { mutableStateOf<MediaItem?>(null) }
     var menu by remember { mutableStateOf(false) }
     var dismissFraction by remember { mutableStateOf(0f) }
 
@@ -116,7 +113,7 @@ fun ViewerScreen(source: String, startId: Long) {
     val backOffsetY = remember { Animatable(0f) }
     var backFromLeft by remember { mutableStateOf(true) }
     var closingByGesture by remember { mutableStateOf(false) }
-    PredictiveBackHandler(enabled = backAnimations && info == null && upscale == null && !closingByGesture) { events ->
+    PredictiveBackHandler(enabled = backAnimations && info == null && !closingByGesture) { events ->
         var startY = Float.NaN
         try {
             events.collect { e ->
@@ -325,8 +322,6 @@ fun ViewerScreen(source: String, startId: Long) {
                     }
                     if (item.isImage) {
                         IconButton(onClick = { nav.editor(item.id) }) { Icon(Icons.Outlined.Edit, "Bearbeiten") }
-                        IconButton(onClick = { nav.aiEditor(item.id) }) { Icon(Icons.Outlined.AutoFixHigh, "KI-Editor") }
-                        IconButton(onClick = { upscale = item }) { Icon(Icons.Outlined.Hd, "Hochskalieren") }
                     }
                     IconButton(onClick = { info = item }) { Icon(Icons.Outlined.Info, "Info") }
                     IconButton(onClick = { scope.launch { actions.trash(listOf(item)) } }) { Icon(Icons.Outlined.Delete, "Löschen") }
@@ -336,7 +331,6 @@ fun ViewerScreen(source: String, startId: Long) {
     }
 
     info?.let { InfoSheet(it, onDismiss = { info = null }) }
-    upscale?.let { UpscaleSheet(it, onDismiss = { upscale = null }) }
 }
 
 @Composable

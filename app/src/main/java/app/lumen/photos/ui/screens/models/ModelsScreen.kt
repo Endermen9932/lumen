@@ -68,7 +68,6 @@ import app.lumen.photos.ai.AiModel
 import app.lumen.photos.ai.IndexProgress
 import app.lumen.photos.ai.ModelCatalog
 import app.lumen.photos.container
-import app.lumen.photos.edit.ToolKind
 import app.lumen.photos.work.BackgroundJobs
 import app.lumen.photos.ui.components.BackButton
 import app.lumen.photos.ui.components.Dots
@@ -160,12 +159,6 @@ fun ModelsScreen() {
             item {
                 Text("Gesichtserkennung (Personen)", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp))
                 app.lumen.photos.ui.screens.people.FaceModelsSection()
-            }
-            ToolKind.entries.forEach { kind ->
-                item(key = "tool-${kind.name}") {
-                    Text(kind.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp))
-                    ToolModelsSection(kind)
-                }
             }
         }
     }

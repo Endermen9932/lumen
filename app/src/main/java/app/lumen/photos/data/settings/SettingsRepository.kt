@@ -89,10 +89,6 @@ data class AppSettings(
     val backGestureAnimations: Boolean = true,
     val activeModelId: String? = null,
     val activeFaceModelId: String? = null,
-    /** Image tools (see ToolModelCatalog). */
-    val activeUpscaleModelId: String? = null,
-    val activeInpaintModelId: String? = null,
-    val activeSegmentModelId: String? = null,
     val aiThreads: Int = 6,
     val useXnnpack: Boolean = false,
     val indexOnlyWhileCharging: Boolean = false,
