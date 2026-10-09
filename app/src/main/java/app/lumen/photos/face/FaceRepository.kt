@@ -308,6 +308,11 @@ class FaceRepository(
         refreshPerson(keep)
     }
 
+    /** Merges several persons into [keep] at once (multi-select in the Personen tab). */
+    suspend fun mergeAll(keep: Long, others: Collection<Long>) {
+        for (id in others) if (id != keep) merge(keep = keep, remove = id)
+    }
+
     /** Swipe right: this face really is the person. */
     suspend fun confirm(face: FaceEntity, personId: Long) {
         val old = face.personId

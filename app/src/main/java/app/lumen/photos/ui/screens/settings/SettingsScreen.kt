@@ -100,8 +100,9 @@ fun SettingsScreen() {
             SwitchRow("AMOLED-Schwarz", "Reines Schwarz im dunklen Design – spart Akku auf dem OLED-Display", s.amoledBlack) { v -> update { it.copy(amoledBlack = v) } }
             SwitchRow("Reduzierte Bewegung", "Ruhigere Standard-Animationen statt Expressive-Federn", s.reduceMotion) { v -> update { it.copy(reduceMotion = v) } }
             SwitchRow(
-                "Animation bei Zurück-Geste",
-                "Seiten und Fotos folgen beim Zurückwischen dem Finger. Aus: Seiten schließen sofort ohne Animation",
+                "Navigations-Animationen",
+                "Übergänge zwischen Seiten und Tabs, Foto-Flug ins Vollbild und Vorschau beim Zurückwischen (Predictive Back). " +
+                    "Aus: Seiten wechseln sofort, ohne jede Animation",
                 s.backGestureAnimations
             ) { v -> update { it.copy(backGestureAnimations = v) } }
 

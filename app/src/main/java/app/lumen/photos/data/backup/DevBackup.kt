@@ -69,6 +69,9 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
     private val _state = MutableStateFlow(DevBackupState())
     val state: StateFlow<DevBackupState> = _state.asStateFlow()
 
+    /** The backup folder chosen by the user (default `Documents/Photos`). */
+    val root: File get() = c.settings.current.devBackupPath?.let(::File) ?: defaultRoot
+
     private val modelsDir get() = File(context.filesDir, "models")
     private val settingsFile get() = File(context.filesDir, "datastore/$SETTINGS_FILE")
 
@@ -83,6 +86,12 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
         refreshInfo()
         if (justRestored) {
             c.scope.launch {
+                val source = File(context.filesDir, RESTORED_FROM_FILE)
+                source.takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotEmpty() }?.let { path ->
+                    c.settings.update { it.copy(devBackupPath = path.takeIf { p -> File(p) != defaultRoot }) }
+                    refreshInfo()
+                }
+                source.delete()
                 // The SAF permission of the photo backup target does not survive a reinstall.
                 c.settings.updateBackup { it.copy(treeUri = null, folderName = null, autoBackup = false) }
             }
@@ -126,9 +135,19 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
         _state.update { it.copy(info = info, foreign = info != null && info.installId != installId) }
     }
 
-    private fun readInfo(): DevBackupInfo? = runCatching {
-        json.decodeFromString(DevBackupInfo.serializer(), File(root, MANIFEST).readText())
+    private fun readInfo(dir: File = root): DevBackupInfo? = runCatching {
+        json.decodeFromString(DevBackupInfo.serializer(), File(dir, MANIFEST).readText())
     }.getOrNull()
+
+    /** Backup info of another folder (for "Wiederherstellen aus …"). */
+    fun infoOf(dir: File): DevBackupInfo? = if (hasAccess()) readInfo(dir) else null
+
+    /** Moves future backups to [dir] (the old folder is left as it is) and backs up right away. */
+    suspend fun setFolder(dir: File) {
+        c.settings.update { it.copy(devBackupPath = dir.absolutePath.takeIf { _ -> dir != defaultRoot }) }
+        refreshInfo()
+        if (enabled() && !_state.value.foreign) backupNow()
+    }
 
     // ------------------------------------------------------------------ backup
 
@@ -194,11 +213,12 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
      * Copies the models back right away and stages database and settings; they are moved into
      * place by [applyPendingRestore] on the next start. Afterwards call [restartApp].
      */
-    suspend fun restore(): Result<Unit> = mutex.withLock {
+    suspend fun restore(from: File = root): Result<Unit> = mutex.withLock {
         withContext(Dispatchers.IO) {
             runCatching {
                 check(hasAccess()) { "Kein Zugriff auf alle Dateien" }
-                val info = readInfo() ?: error("Kein Backup in ${root.path} gefunden")
+                val root = from
+                val info = readInfo(root) ?: error("Kein Backup in ${folderLabel(root)} gefunden")
                 // Nothing may write into the database that is about to be replaced.
                 c.ai.cancelIndexing()
                 c.faces.cancel()
@@ -222,6 +242,7 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
                 File(root, DB_NAME).takeIf { it.exists() }?.copyTo(File(pending, DB_NAME), overwrite = true)
                 File(root, SETTINGS_FILE).takeIf { it.exists() }?.copyTo(File(pending, SETTINGS_FILE), overwrite = true)
                 File(pending, READY_MARKER).writeText(info.installId)
+                File(pending, SOURCE_FILE).writeText(root.absolutePath)
                 _state.update { it.copy(step = "Neustart …") }
             }.onFailure { e ->
                 pendingDir(context).deleteRecursively()
@@ -258,14 +279,42 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
 
     companion object {
         /** `Documents/Photos` on the internal shared storage. */
-        val root: File get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Photos")
-        const val FOLDER_LABEL = "Documents/Photos"
+        val defaultRoot: File get() = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Photos")
+
+        /** Short, readable form of a backup folder: "Documents/Photos", "SD-Karte/Lumen" … */
+        fun folderLabel(dir: File): String {
+            val internal = Environment.getExternalStorageDirectory().absolutePath
+            val path = dir.absolutePath
+            return when {
+                path == internal -> "Interner Speicher"
+                path.startsWith("$internal/") -> path.removePrefix("$internal/")
+                path.startsWith("/storage/") -> "Externer Speicher/" + path.removePrefix("/storage/").substringAfter('/')
+                else -> path
+            }
+        }
+
+        /**
+         * The folder behind a folder picked in the Android file picker. The backup works with plain
+         * files (it must survive a reinstall), so only real storage – internal, SD card, USB stick –
+         * can be used, not cloud providers.
+         */
+        fun folderOf(treeUri: Uri): File? {
+            if (treeUri.authority != "com.android.externalstorage.documents") return null
+            val docId = runCatching { android.provider.DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
+            val volume = docId.substringBefore(':')
+            val rel = docId.substringAfter(':', "")
+            val base = if (volume.equals("primary", ignoreCase = true)) Environment.getExternalStorageDirectory() else File("/storage/$volume")
+            return if (rel.isEmpty()) base else File(base, rel)
+        }
 
         private const val DB_NAME = "lumen.db"
         private const val SETTINGS_FILE = "settings.preferences_pb"
         private const val MANIFEST = "backup.json"
         private const val INSTALL_ID_FILE = "install_id"
         private const val READY_MARKER = "ready"
+        private const val SOURCE_FILE = "source"
+        /** Folder the last restore came from – future backups go there too. */
+        private const val RESTORED_FROM_FILE = "restored_from"
         private const val SETTLE_MS = 45_000L
         private const val MAX_DELAY_MS = 10 * 60_000L
         private val TABLES = arrayOf("embeddings", "optimized", "faces", "face_scans", "persons", "face_rejections")
@@ -277,7 +326,7 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
             Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${context.packageName}"))
 
         /** True if the folder contains a backup (only readable with [hasAccess]). */
-        fun backupExists(): Boolean = hasAccess() && File(root, MANIFEST).exists()
+        fun backupExists(dir: File = defaultRoot): Boolean = hasAccess() && File(dir, MANIFEST).exists()
 
         private fun pendingDir(context: Context) = File(context.filesDir, "restore-pending")
 
@@ -307,6 +356,7 @@ class DevBackup(private val context: Context, private val c: AppContainer) {
                 }
                 // Adopt the identity of the backup so the next automatic backup may update it.
                 File(context.filesDir, INSTALL_ID_FILE).writeText(marker.readText())
+                File(dir, SOURCE_FILE).takeIf { it.exists() }?.copyTo(File(context.filesDir, RESTORED_FROM_FILE), overwrite = true)
             }.isSuccess
             dir.deleteRecursively()
             return applied

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.SelectAll
+import androidx.compose.material.icons.automirrored.outlined.CallMerge
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.FilledTonalButton
@@ -109,6 +110,7 @@ fun PeopleTab(onSelectionModeChange: (Boolean) -> Unit = {}) {
     var showHidden by remember { mutableStateOf(false) }
     var modelSheet by remember { mutableStateOf(false) }
     var selection by remember { mutableStateOf(emptySet<Long>()) }
+    var mergeSelection by remember { mutableStateOf(false) }
     val ready = model != null && model!!.id in installed
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -276,6 +278,11 @@ fun PeopleTab(onSelectionModeChange: (Boolean) -> Unit = {}) {
                     IconButton(onClick = { selection = visible.filter { it.name == null }.mapTo(HashSet()) { it.id } }) {
                         Icon(Icons.Outlined.SelectAll, "Alle Unbekannten auswählen")
                     }
+                    if (selected.size >= 2) {
+                        IconButton(onClick = { mergeSelection = true }) {
+                            Icon(Icons.AutoMirrored.Outlined.CallMerge, "Zusammenführen")
+                        }
+                    }
                     FilledTonalButton(onClick = {
                         val ids = selected.map { it.id }
                         val hide = !allHidden
@@ -296,6 +303,26 @@ fun PeopleTab(onSelectionModeChange: (Boolean) -> Unit = {}) {
                 }
             }
         }
+    }
+
+    if (mergeSelection && selected.size >= 2) {
+        // The person to keep comes first: a named one with the most photos.
+        val ordered = selected.sortedWith(compareByDescending<Person> { it.name != null }.thenByDescending { it.mediaIds.size })
+        MergeDialog(
+            persons = ordered,
+            title = "${selected.size} Personen zusammenführen",
+            hint = "Alle Fotos landen bei einer Person. Welche soll bleiben (mit ihrem Namen und Bild)?",
+            onDismiss = { mergeSelection = false },
+            onPick = { keep ->
+                mergeSelection = false
+                val others = selected.map { it.id }.filter { it != keep.id }
+                selection = emptySet()
+                scope.launch {
+                    c.faces.mergeAll(keep.id, others)
+                    Toast.makeText(context, "${others.size + 1} Personen zu „${keep.displayName}“ zusammengeführt", Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
     }
 
     if (modelSheet) {

@@ -42,7 +42,11 @@ fun FaceEntity.crop(uri: Uri, size: Int = 320) = FaceCrop(uri, id, left, top, ri
 
 class FaceCropFetcher(private val data: FaceCrop, private val context: Context) : Fetcher {
     override suspend fun fetch(): FetchResult {
-        val src = context.contentResolver.loadThumbnail(data.uri, android.util.Size(1280, 1280), null)
+        // Only as many pixels as the crop needs: a big face needs a small thumbnail. Loading the
+        // full 1280 px version for every portrait made long person lists run out of memory.
+        val faceFraction = max(data.right - data.left, data.bottom - data.top).coerceAtLeast(0.01f) * 1.7f
+        val sourceSize = (data.size / faceFraction).roundToInt().coerceIn(256, 1280)
+        val src = ThumbnailLoader.load(context, data.uri, sourceSize)
         val w = src.width
         val h = src.height
         val cx = (data.left + data.right) / 2f * w

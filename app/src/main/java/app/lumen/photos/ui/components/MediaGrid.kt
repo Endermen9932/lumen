@@ -176,6 +176,11 @@ fun MediaGrid(
     }
 
     val edge = with(LocalDensity.current) { 96.dp.toPx() }
+    // While the grid moves, cells load small thumbnails; the sharp ones follow once it stops.
+    var fastScrolling by remember { mutableStateOf(false) }
+    val scrolling by remember { derivedStateOf { state.isScrollInProgress } }
+    val lowRes = scrolling || fastScrolling
+    val thumbSize = gridThumbSize(columns)
 
     BoxWithConstraints(modifier) {
         val viewportHeight = constraints.maxHeight.toFloat()
@@ -307,6 +312,8 @@ fun MediaGrid(
                             selected = entry.item.id in selection,
                             cornerRadius = if (columns >= 6) 2 else 4,
                             showBadges = columns <= 6,
+                            size = thumbSize,
+                            lowRes = lowRes,
                             modifier = Modifier
                                 .animateItem()
                                 .aspectRatio(1f)
@@ -328,6 +335,7 @@ fun MediaGrid(
             bottomPadding = contentPadding.calculateBottomPadding(),
             modifier = Modifier.align(Alignment.TopEnd),
             onScrollTo = { index -> scope.launch { state.scrollToItem(index) } },
+            onDraggingChange = { fastScrolling = it },
         )
     }
 }
@@ -372,10 +380,12 @@ private fun FastScroller(
     topPadding: androidx.compose.ui.unit.Dp,
     bottomPadding: androidx.compose.ui.unit.Dp,
     onScrollTo: (Int) -> Unit,
+    onDraggingChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (entries.size < 60) return
     var dragging by remember { mutableStateOf(false) }
+    LaunchedEffect(dragging) { onDraggingChange(dragging) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
     val scrolling by remember { derivedStateOf { state.isScrollInProgress } }
     val visible = dragging || scrolling

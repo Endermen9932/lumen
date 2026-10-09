@@ -74,6 +74,8 @@ import app.lumen.photos.container
 import app.lumen.photos.data.media.MediaItem
 import app.lumen.photos.ui.components.Format
 import app.lumen.photos.ui.components.thumbKey
+import app.lumen.photos.ui.components.GRID_THUMB_SIZES
+import coil3.SingletonImageLoader
 import app.lumen.photos.ui.navigation.LocalNavigator
 import app.lumen.photos.ui.rememberMediaActions
 import app.lumen.photos.ui.sharedMedia
@@ -205,9 +207,13 @@ fun ViewerScreen(source: String, startId: Long) {
                 } else {
                     val zoom = rememberZoomableImageState(rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = 12f)))
                     val request = remember(item.uri, item.dateModified) {
+                        // Placeholder: the sharpest grid thumbnail that is still in memory.
+                        val cache = SingletonImageLoader.get(context).memoryCache
+                        val placeholder = GRID_THUMB_SIZES.map { MemoryCache.Key(thumbKey(item, it)) }
+                            .firstOrNull { cache?.get(it) != null } ?: MemoryCache.Key(thumbKey(item))
                         ImageRequest.Builder(context)
                             .data(item.uri)
-                            .placeholderMemoryCacheKey(MemoryCache.Key(thumbKey(item)))
+                            .placeholderMemoryCacheKey(placeholder)
                             .build()
                     }
                     ZoomableAsyncImage(

@@ -36,14 +36,29 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.lumen.photos.data.media.MediaItem
 import app.lumen.photos.ui.sharedMedia
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 
 /** Size in pixels used for grid thumbnails (and as placeholder key in the viewer). */
 const val GRID_THUMB_SIZE = 384
 
+/** Size used while the grid scrolls: cheap to decode, upgraded once scrolling stops. */
+const val SCROLL_THUMB_SIZE = 128
+
 fun thumbKey(item: MediaItem, size: Int = GRID_THUMB_SIZE) = "thumb:${item.uri}:$size:${item.dateModified}"
+
+/** Thumbnail size for a grid with [columns] columns – smaller cells need fewer pixels. */
+fun gridThumbSize(columns: Int): Int = when {
+    columns <= 4 -> GRID_THUMB_SIZE
+    columns <= 6 -> 256
+    else -> 192
+}
+
+/** Every size a grid thumbnail can have, largest first (the viewer uses the best one cached). */
+val GRID_THUMB_SIZES = listOf(GRID_THUMB_SIZE, 256, 192, SCROLL_THUMB_SIZE)
 
 @Composable
 fun MediaThumbnail(
@@ -55,13 +70,20 @@ fun MediaThumbnail(
     size: Int = GRID_THUMB_SIZE,
     cornerRadius: Int = 4,
     showBadges: Boolean = true,
+    /** The grid is scrolling: load a small thumbnail unless the full one is already in memory. */
+    lowRes: Boolean = false,
 ) {
     val context = LocalContext.current
-    val request = remember(item.uri, item.dateModified, size) {
+    val useLow = lowRes && size > SCROLL_THUMB_SIZE &&
+        SingletonImageLoader.get(context).memoryCache?.get(MemoryCache.Key(thumbKey(item, size))) == null
+    val requestSize = if (useLow) SCROLL_THUMB_SIZE else size
+    val request = remember(item.uri, item.dateModified, requestSize) {
         ImageRequest.Builder(context)
-            .data(Thumb(item.uri, size, item.dateModified))
-            .memoryCacheKey(thumbKey(item, size))
-            .crossfade(120)
+            .data(Thumb(item.uri, requestSize, item.dateModified))
+            .memoryCacheKey(thumbKey(item, requestSize))
+            // The sharp version replaces the small one without flashing the empty cell.
+            .apply { if (requestSize != SCROLL_THUMB_SIZE) placeholderMemoryCacheKey(thumbKey(item, SCROLL_THUMB_SIZE)) }
+            .crossfade(if (useLow) 0 else 120)
             .build()
     }
     val inset by animateDpAsState(if (selected) 10.dp else 0.dp, label = "inset")

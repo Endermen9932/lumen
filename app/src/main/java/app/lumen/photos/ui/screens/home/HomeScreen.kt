@@ -2,6 +2,9 @@ package app.lumen.photos.ui.screens.home
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import app.lumen.photos.ui.LocalAppSettings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -64,13 +67,18 @@ fun HomeScreen() {
     val timelineState = rememberLazyGridState()
 
     BackHandler(enabled = tab != 0) { tab = 0 }
+    val animations = LocalAppSettings.current.backGestureAnimations
 
     Box(Modifier.fillMaxSize()) {
         AnimatedContent(
             targetState = tab,
             transitionSpec = {
-                (fadeIn(tween(220, delayMillis = 60)) + scaleIn(initialScale = 0.96f, animationSpec = tween(280)))
-                    .togetherWith(fadeOut(tween(90)))
+                if (animations) {
+                    (fadeIn(tween(220, delayMillis = 60)) + scaleIn(initialScale = 0.96f, animationSpec = tween(280)))
+                        .togetherWith(fadeOut(tween(90)))
+                } else {
+                    EnterTransition.None.togetherWith(ExitTransition.None)
+                }
             },
             label = "tabs",
         ) { current ->

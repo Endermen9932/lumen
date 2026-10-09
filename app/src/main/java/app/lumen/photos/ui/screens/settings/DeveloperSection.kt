@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.Restore
+import androidx.compose.material.icons.outlined.FolderOpen
+import java.io.File
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -58,6 +60,24 @@ fun DeveloperSection() {
     var askRestore by remember { mutableStateOf(false) }
     var confirmOverwrite by remember { mutableStateOf(false) }
     var restoring by remember { mutableStateOf(false) }
+    var restoreFrom by remember { mutableStateOf<File?>(null) }
+    val folder = DevBackup.folderLabel(c.devBackup.root)
+
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val dir = DevBackup.folderOf(uri)
+        if (dir == null) Toast.makeText(context, NOT_LOCAL, Toast.LENGTH_LONG).show()
+        else scope.launch { c.devBackup.setFolder(dir) }
+    }
+    val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val dir = DevBackup.folderOf(uri)
+        when {
+            dir == null -> Toast.makeText(context, NOT_LOCAL, Toast.LENGTH_LONG).show()
+            c.devBackup.infoOf(dir) == null -> Toast.makeText(context, "Kein Lumen-Backup in ${DevBackup.folderLabel(dir)} gefunden", Toast.LENGTH_LONG).show()
+            else -> restoreFrom = dir
+        }
+    }
 
     fun enable() = scope.launch {
         c.settings.update { it.copy(developerMode = true) }
@@ -78,7 +98,7 @@ fun DeveloperSection() {
     ListItem(
         headlineContent = { Text("Entwicklermodus") },
         supportingContent = {
-            Text("Sichert Modelle, Suchindex, Gesichter & Namen und alle Einstellungen in „${DevBackup.FOLDER_LABEL}“. Nach einer Neuinstallation ist mit einem Tipp alles wieder da – ohne neu herunterzuladen oder zu indexieren.")
+            Text("Sichert Modelle, Suchindex, Gesichter & Namen und alle Einstellungen in einen Ordner deiner Wahl (Standard: Documents/Photos). Nach einer Neuinstallation ist mit einem Tipp alles wieder da – ohne neu herunterzuladen oder zu indexieren.")
         },
         trailingContent = {
             Switch(checked = s.developerMode, onCheckedChange = null)
@@ -104,7 +124,15 @@ fun DeveloperSection() {
                 )
                 Button(onClick = { accessLauncher.launch(DevBackup.accessIntent(context)) }) { Text("Zugriff erlauben") }
             } else {
-                Text(backupSummary(state.info), style = MaterialTheme.typography.bodyMedium)
+                ListItem(
+                    headlineContent = { Text("Speicherort") },
+                    supportingContent = { Text(folder) },
+                    leadingContent = { Icon(Icons.Outlined.FolderOpen, null) },
+                    trailingContent = {
+                        TextButton(onClick = { folderPicker.launch(null) }, enabled = !state.running) { Text("Ändern") }
+                    },
+                )
+                Text(backupSummary(state.info, folder), style = MaterialTheme.typography.bodyMedium)
                 if (state.running) {
                     Text(state.step ?: "Sichern …", style = MaterialTheme.typography.labelMedium)
                     val p = state.progress
@@ -134,6 +162,9 @@ fun DeveloperSection() {
                         Icon(Icons.Outlined.Restore, null); Text(" Wiederherstellen")
                     }
                 }
+                TextButton(onClick = { restorePicker.launch(null) }, enabled = !state.running) {
+                    Icon(Icons.Outlined.FolderOpen, null); Text(" Aus anderem Ordner wiederherstellen …")
+                }
                 Text(
                     "Wird automatisch aktualisiert, sobald sich Einstellungen, Modelle, Index oder Personen ändern. " +
                         "Nach dem Neuinstallieren: beim Start „Backup wiederherstellen“ tippen oder hier den Entwicklermodus einschalten.",
@@ -149,7 +180,7 @@ fun DeveloperSection() {
             onDismissRequest = { askRestore = false },
             title = { Text("Backup wiederherstellen?") },
             text = {
-                Text(backupSummary(state.info) + "\n\nModelle, Suchindex, Gesichter, Namen und Einstellungen werden durch den Stand des Backups ersetzt. Die App startet danach neu.")
+                Text(backupSummary(state.info, folder) + "\n\nModelle, Suchindex, Gesichter, Namen und Einstellungen werden durch den Stand des Backups ersetzt. Die App startet danach neu.")
             },
             confirmButton = { Button(onClick = { askRestore = false; restoring = true }) { Text("Wiederherstellen") } },
             dismissButton = { TextButton(onClick = { askRestore = false }) { Text("Abbrechen") } },
@@ -167,21 +198,46 @@ fun DeveloperSection() {
         )
     }
     if (restoring) RestoreDialog(onFinished = { restoring = false })
+    restoreFrom?.let { dir -> RestoreFromFolderDialog(dir, onDone = { restoreFrom = null }) }
 }
 
-fun backupSummary(info: DevBackupInfo?): String =
-    if (info == null) "Noch keine Sicherung in ${DevBackup.FOLDER_LABEL}."
+private const val NOT_LOCAL = "Bitte einen Ordner im internen Speicher, auf der SD-Karte oder einem USB-Stick wählen – Cloud-Ordner gehen für das Backup nicht."
+
+fun backupSummary(info: DevBackupInfo?, folder: String): String =
+    if (info == null) "Noch keine Sicherung in $folder."
     else "Stand: ${Format.full(info.createdAt)} · ${Format.bytes(info.modelBytes + info.databaseBytes)} · " +
         "${info.models.size} ${if (info.models.size == 1) "Modell" else "Modelle"} · Lumen ${info.appVersion}"
 
+/** Confirms and runs a restore from a folder picked in the file picker. */
+@Composable
+private fun RestoreFromFolderDialog(dir: File, onDone: () -> Unit) {
+    val c = LocalContext.current.container
+    var running by remember { mutableStateOf(false) }
+    if (running) {
+        RestoreDialog(from = dir, onFinished = { running = false; onDone() })
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text("Aus diesem Ordner wiederherstellen?") },
+        text = {
+            Text(backupSummary(c.devBackup.infoOf(dir), DevBackup.folderLabel(dir)) +
+                "\n\nModelle, Suchindex, Gesichter, Namen und Einstellungen werden durch den Stand des Backups ersetzt. " +
+                "Künftige Sicherungen landen ebenfalls in diesem Ordner. Die App startet danach neu.")
+        },
+        confirmButton = { Button(onClick = { running = true }) { Text("Wiederherstellen") } },
+        dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
+    )
+}
+
 /** Runs the restore with a progress dialog and restarts the app when it is done. */
 @Composable
-fun RestoreDialog(onFinished: () -> Unit) {
+fun RestoreDialog(from: File? = null, onFinished: () -> Unit) {
     val context = LocalContext.current
     val c = context.container
     val state by c.devBackup.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
-        val result = c.devBackup.restore()
+        val result = if (from != null) c.devBackup.restore(from) else c.devBackup.restore()
         if (result.isSuccess) {
             DevBackup.restartApp(context)
         } else {
@@ -215,10 +271,24 @@ fun RestoreFromBackupButton(modifier: Modifier = Modifier) {
     val c = context.container
     var confirm by remember { mutableStateOf(false) }
     var restoring by remember { mutableStateOf(false) }
+    var restoreFrom by remember { mutableStateOf<File?>(null) }
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val dir = DevBackup.folderOf(uri)
+        when {
+            dir == null -> Toast.makeText(context, NOT_LOCAL, Toast.LENGTH_LONG).show()
+            c.devBackup.infoOf(dir) == null -> Toast.makeText(context, "Kein Lumen-Backup in ${DevBackup.folderLabel(dir)} gefunden", Toast.LENGTH_LONG).show()
+            else -> restoreFrom = dir
+        }
+    }
     fun check() {
         c.devBackup.refreshInfo()
         if (DevBackup.backupExists()) confirm = true
-        else Toast.makeText(context, "Kein Backup in ${DevBackup.FOLDER_LABEL} gefunden", Toast.LENGTH_LONG).show()
+        else {
+            // Not in the default folder: let the user show where the backup is.
+            Toast.makeText(context, "Kein Backup in Documents/Photos – bitte den Backup-Ordner wählen", Toast.LENGTH_LONG).show()
+            folderPicker.launch(null)
+        }
     }
     val accessLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (DevBackup.hasAccess()) check()
@@ -233,10 +303,13 @@ fun RestoreFromBackupButton(modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Backup gefunden") },
-            text = { Text(backupSummary(state.info) + "\n\nAlles wiederherstellen? Die App startet danach neu.") },
+            text = { Text(backupSummary(state.info, "Documents/Photos") + "\n\nAlles wiederherstellen? Die App startet danach neu.") },
             confirmButton = { Button(onClick = { confirm = false; restoring = true }) { Text("Wiederherstellen") } },
-            dismissButton = { TextButton(onClick = { confirm = false }) { Text("Abbrechen") } },
+            dismissButton = {
+                TextButton(onClick = { confirm = false; folderPicker.launch(null) }) { Text("Anderer Ordner …") }
+            },
         )
     }
-    if (restoring) RestoreDialog(onFinished = { restoring = false })
+    if (restoring) RestoreDialog(from = DevBackup.defaultRoot, onFinished = { restoring = false })
+    restoreFrom?.let { dir -> RestoreFromFolderDialog(dir, onDone = { restoreFrom = null }) }
 }

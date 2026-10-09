@@ -133,6 +133,17 @@ private val PageCorner = 32.dp
  */
 @Composable
 private fun AnimatedContentScope.Page(content: @Composable () -> Unit) {
+    if (!LocalAppSettings.current.backGestureAnimations) {
+        // Navigation animations off: a plain page – no corner animation that would keep the
+        // transition (and the old page) alive for a few hundred milliseconds.
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.fillMaxSize(),
+            content = content,
+        )
+        return
+    }
     val corner by transition.animateDp(transitionSpec = { tween(POP_MS, easing = Standard) }, label = "pageCorner") {
         if (it == EnterExitState.Visible) 0.dp else PageCorner
     }
@@ -146,24 +157,26 @@ private fun AnimatedContentScope.Page(content: @Composable () -> Unit) {
     }
 }
 
+private val noEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = { EnterTransition.None }
+private val noExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = { ExitTransition.None }
+
 @Composable
 fun LumenNavHost(startOnboarding: Boolean, onNavigatorReady: (Navigator) -> Unit) {
     val controller = rememberNavController()
     val navigator = remember(controller) { Navigator(controller) }
-    // "Animation bei Zurück-Geste" off: going back switches screens instantly.
-    val backAnimations = LocalAppSettings.current.backGestureAnimations
-    val popEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition =
-        if (backAnimations) popIn else { { EnterTransition.None } }
-    val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition =
-        if (backAnimations) popOut else { { ExitTransition.None } }
+    // "Navigations-Animationen" off: every screen change is instant – no slide/fade when opening,
+    // no predictive back preview, no shared-element flight into the viewer.
+    val anim = LocalAppSettings.current.backGestureAnimations
+    val popEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = if (anim) popIn else noEnter
+    val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = if (anim) popOut else noExit
     androidx.compose.runtime.LaunchedEffect(navigator) { onNavigatorReady(navigator) }
     SharedTransitionLayout {
         CompositionLocalProvider(LocalSharedTransitionScope provides this, LocalNavigator provides navigator) {
             NavHost(
                 navController = controller,
                 startDestination = if (startOnboarding) OnboardingRoute else HomeRoute,
-                enterTransition = slideIn,
-                exitTransition = slideOut,
+                enterTransition = if (anim) slideIn else noEnter,
+                exitTransition = if (anim) slideOut else noExit,
                 popEnterTransition = popEnter,
                 popExitTransition = popExit,
             ) {
@@ -172,11 +185,15 @@ fun LumenNavHost(startOnboarding: Boolean, onNavigatorReady: (Navigator) -> Unit
                 }
                 composable<HomeRoute>(
                     exitTransition = {
-                        if (targetState.destination.hasRoute<ViewerRoute>()) fadeOut(tween(300)) else slideOut()
+                        when {
+                            !anim -> ExitTransition.None
+                            targetState.destination.hasRoute<ViewerRoute>() -> fadeOut(tween(300))
+                            else -> slideOut()
+                        }
                     },
                     popEnterTransition = {
                         when {
-                            !backAnimations -> EnterTransition.None
+                            !anim -> EnterTransition.None
                             initialState.destination.hasRoute<ViewerRoute>() ->
                                 fadeIn(tween(300)) + scaleIn(tween(POP_MS, easing = Standard), initialScale = 0.96f)
                             else -> popIn()
@@ -186,13 +203,13 @@ fun LumenNavHost(startOnboarding: Boolean, onNavigatorReady: (Navigator) -> Unit
                     CompositionLocalProvider(LocalNavAnimatedScope provides this) { Page { HomeScreen() } }
                 }
                 composable<ViewerRoute>(
-                    enterTransition = { fadeIn(tween(250)) },
-                    exitTransition = { fadeOut(tween(250)) },
-                    popEnterTransition = { if (backAnimations) fadeIn(tween(250)) else EnterTransition.None },
+                    enterTransition = { if (anim) fadeIn(tween(250)) else EnterTransition.None },
+                    exitTransition = { if (anim) fadeOut(tween(250)) else ExitTransition.None },
+                    popEnterTransition = { if (anim) fadeIn(tween(250)) else EnterTransition.None },
                     // The viewer shrinks the photo with the finger itself (see ViewerScreen) and
                     // then lets it shrink a little further while fading out.
                     popExitTransition = {
-                        if (backAnimations) fadeOut(tween(300)) + scaleOut(tween(300, easing = Standard), targetScale = 0.9f)
+                        if (anim) fadeOut(tween(300)) + scaleOut(tween(300, easing = Standard), targetScale = 0.9f)
                         else ExitTransition.None
                     },
                 ) { entry ->
@@ -200,8 +217,8 @@ fun LumenNavHost(startOnboarding: Boolean, onNavigatorReady: (Navigator) -> Unit
                     CompositionLocalProvider(LocalNavAnimatedScope provides this) { ViewerScreen(route.source, route.id) }
                 }
                 composable<ExternalViewerRoute>(
-                    enterTransition = { fadeIn() + scaleIn(initialScale = 0.92f) },
-                    popExitTransition = { if (backAnimations) popOut() else ExitTransition.None },
+                    enterTransition = { if (anim) fadeIn() + scaleIn(initialScale = 0.92f) else EnterTransition.None },
+                    popExitTransition = { if (anim) popOut() else ExitTransition.None },
                 ) { entry ->
                     val route = entry.toRoute<ExternalViewerRoute>()
                     ExternalViewerScreen(route.uri, route.mime)
@@ -222,17 +239,20 @@ fun LumenNavHost(startOnboarding: Boolean, onNavigatorReady: (Navigator) -> Unit
                     CompositionLocalProvider(LocalNavAnimatedScope provides this) { Page { PersonScreen(entry.toRoute<PersonRoute>().id) } }
                 }
                 composable<ReviewRoute>(
-                    enterTransition = { slideInVertically(tween(ENTER_MS, easing = EmphasizedDecelerate)) { it / 3 } + fadeIn(tween(250)) },
+                    enterTransition = {
+                        if (anim) slideInVertically(tween(ENTER_MS, easing = EmphasizedDecelerate)) { it / 3 } + fadeIn(tween(250))
+                        else EnterTransition.None
+                    },
                     popExitTransition = {
-                        if (backAnimations) scaleOut(tween(POP_MS, easing = Standard), targetScale = 0.9f) +
+                        if (anim) scaleOut(tween(POP_MS, easing = Standard), targetScale = 0.9f) +
                             slideOutVertically(tween(POP_MS, easing = Standard)) { it / 4 } +
                             fadeOut(tween(POP_MS / 2, delayMillis = POP_MS / 2))
                         else ExitTransition.None
                     },
                 ) { entry -> Page { ReviewScreen(entry.toRoute<ReviewRoute>().personId) } }
                 composable<EditorRoute>(
-                    enterTransition = { fadeIn() + scaleIn(initialScale = 0.94f) },
-                    popExitTransition = { if (backAnimations) popOut() else ExitTransition.None },
+                    enterTransition = { if (anim) fadeIn() + scaleIn(initialScale = 0.94f) else EnterTransition.None },
+                    popExitTransition = { if (anim) popOut() else ExitTransition.None },
                 ) { entry -> EditorScreen(entry.toRoute<EditorRoute>().id) }
             }
         }

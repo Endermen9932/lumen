@@ -104,6 +104,8 @@ data class AppSettings(
     val onboardingDone: Boolean = false,
     /** Mirrors models, indexes and settings to Documents/Photos so a reinstall loses nothing. */
     val developerMode: Boolean = false,
+    /** Folder of the developer backup; null = Documents/Photos. */
+    val devBackupPath: String? = null,
     val optimizer: OptimizerSettings = OptimizerSettings(),
     val backup: BackupSettings = BackupSettings(),
     val videoOptimizer: VideoOptimizerSettings = VideoOptimizerSettings(),

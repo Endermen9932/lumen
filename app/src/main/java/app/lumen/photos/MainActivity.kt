@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
+import kotlinx.coroutines.flow.map
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
         if (!startOnboarding) c.media.start()
 
         observeBackgroundWork()
+        disableSystemBackAnimationWhenRequested()
 
         setContent {
             val settings by c.settings.settings.collectAsStateWithLifecycle()
@@ -76,6 +79,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * With "Navigations-Animationen" off, back on the start screen is handled here: as long as the
+     * app has a back callback, Android shows no predictive "back to home" preview either. Registered
+     * before any screen, so every other back handler (NavHost, selections …) still comes first.
+     */
+    private fun disableSystemBackAnimationWhenRequested() {
+        val rootBack = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                moveTaskToBack(true)
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, rootBack)
+        lifecycleScope.launch {
+            container.settings.settings.map { !it.backGestureAnimations }.distinctUntilChanged().collect { rootBack.isEnabled = it }
         }
     }
 

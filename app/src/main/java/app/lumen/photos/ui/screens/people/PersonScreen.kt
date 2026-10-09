@@ -223,13 +223,22 @@ fun PersonScreen(personId: Long) {
 }
 
 @Composable
-private fun MergeDialog(persons: List<Person>, onDismiss: () -> Unit, onPick: (Person) -> Unit) {
+internal fun MergeDialog(
+    persons: List<Person>,
+    onDismiss: () -> Unit,
+    title: String = "Zusammenführen mit …",
+    hint: String? = null,
+    onPick: (Person) -> Unit,
+) {
     val c = LocalContext.current.container
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Zusammenführen mit …") },
+        title = { Text(title) },
         text = {
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                if (hint != null) item {
+                    Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                }
                 items(persons, key = { it.id }) { p ->
                     val cover by produceState<FaceEntity?>(null, p.coverFace) { value = p.coverFace?.let { c.faces.face(it) } }
                     val item = remember(cover) { cover?.let { c.media.byId(it.mediaId) } }

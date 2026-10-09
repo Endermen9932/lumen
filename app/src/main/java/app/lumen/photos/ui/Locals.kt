@@ -49,7 +49,8 @@ private val MediaBoundsTransform = BoundsTransform { _: Rect, _: Rect ->
 fun Modifier.sharedMedia(key: Any, enabled: Boolean = true): Modifier {
     val shared = LocalSharedTransitionScope.current ?: return this
     val visibility = LocalNavAnimatedScope.current ?: return this
-    if (!enabled) return this
+    // Navigation animations switched off: no flight between grid and viewer either.
+    if (!enabled || !LocalAppSettings.current.backGestureAnimations) return this
     return with(shared) {
         this@sharedMedia.sharedElement(
             sharedContentState = rememberSharedContentState("media-$key"),
