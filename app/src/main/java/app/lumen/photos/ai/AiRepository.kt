@@ -63,6 +63,9 @@ data class ImportResult(
     val onPhone: Int,
     /** Photos on the phone that are not in the file (they are indexed on the phone as usual). */
     val unmatched: Int,
+    /** A face file: [imported] photos got [faces] faces from the PC. */
+    val isFaces: Boolean = false,
+    val faces: Int = 0,
 )
 
 data class ImportStatus(
@@ -149,6 +152,8 @@ class AiRepository(
                 inFile = out.getInt(IndexImportWorker.KEY_IN_FILE, 0),
                 onPhone = out.getInt(IndexImportWorker.KEY_ON_PHONE, 0),
                 unmatched = out.getInt(IndexImportWorker.KEY_UNMATCHED, 0),
+                isFaces = out.getBoolean(IndexImportWorker.KEY_IS_FACES, false),
+                faces = out.getInt(IndexImportWorker.KEY_FACES, 0),
             ) else null,
             error = if (info.state == WorkInfo.State.FAILED) out.getString(IndexImportWorker.KEY_ERROR) ?: "Import fehlgeschlagen." else null,
         )

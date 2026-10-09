@@ -11,7 +11,9 @@ import kotlin.math.floor
  * with German names where known, their regions (Bundesland, state …) and countries. Used to turn
  * the GPS position of a photo into "München · Bayern · Deutschland" without any network service.
  */
-class PlaceDirectory(private val context: Context) {
+class PlaceDirectory(private val open: () -> java.io.InputStream) {
+    constructor(context: Context) : this({ context.assets.open(ASSET) })
+
 
     class City(
         val index: Int,
@@ -37,7 +39,7 @@ class PlaceDirectory(private val context: Context) {
         if (loaded) return
         val list = ArrayList<City>(65_000)
         val regionNames = HashMap<String, String>(4_000)
-        GZIPInputStream(context.assets.open(ASSET)).bufferedReader().useLines { lines ->
+        GZIPInputStream(open()).bufferedReader().useLines { lines ->
             for (line in lines) {
                 val c = line.split('\t')
                 when (c[0]) {
@@ -107,7 +109,8 @@ class PlaceDirectory(private val context: Context) {
     }
 
     companion object {
-        const val ASSET = "places.tsv.gz"
+        // gzip, but not named .gz: the Android build would unpack (and rename) a .gz asset.
+        const val ASSET = "places.dat"
         private const val KM_PER_DEG = 111.2
     }
 }

@@ -23,6 +23,10 @@ import java.util.zip.ZipInputStream
 object IndexImport {
     const val FORMAT = "lumen-index"
     const val SUPPORTED_VERSION = 1
+
+    /** Same container with face detections instead of image embeddings (desktop "Gesichter exportieren"). */
+    const val FACES_FORMAT = "lumen-faces"
+    const val FACES_SUPPORTED_VERSION = 1
     const val ENCODING = "fp16-le-l2"
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -35,6 +39,8 @@ object IndexImport {
         val modelName: String = "",
         val dim: Int,
         val count: Int,
+        /** Face files: number of faces (= vectors) in the file. */
+        val faces: Int = 0,
         val encoding: String = ENCODING,
         val createdBy: String = "",
         val source: String = "",
@@ -50,9 +56,13 @@ object IndexImport {
         val s: Long,
         /** Modification time (epoch seconds). */
         val m: Long = 0,
+        /** Face files: one [left, top, right, bottom, score] per face (box 0..1 of the oriented photo). */
+        val f: List<List<Float>> = emptyList(),
     )
 
-    class Header(val manifest: Manifest, val items: List<Item>)
+    class Header(val manifest: Manifest, val items: List<Item>) {
+        val isFaces: Boolean get() = manifest.format == FACES_FORMAT
+    }
 
     /** The file is not a (complete) Lumen index. The message is shown to the user. */
     class FormatException(message: String) : Exception(message)
@@ -70,8 +80,8 @@ object IndexImport {
             } catch (e: Exception) {
                 throw FormatException("Die Indexierungsdatei ist beschädigt.")
             }
-            if (manifest.format != FORMAT) throw FormatException("Das ist keine Lumen-Indexierungsdatei.")
-            if (manifest.version > SUPPORTED_VERSION) {
+            if (manifest.format != FORMAT && manifest.format != FACES_FORMAT) throw FormatException("Das ist keine Lumen-Indexierungsdatei.")
+            if (manifest.version > (if (manifest.format == FACES_FORMAT) FACES_SUPPORTED_VERSION else SUPPORTED_VERSION)) {
                 throw FormatException("Die Datei stammt von einer neueren Version des Lumen Indexers – bitte die Lumen-App aktualisieren.")
             }
             if (manifest.encoding != ENCODING || manifest.dim <= 0 || manifest.count < 0) {
@@ -91,6 +101,9 @@ object IndexImport {
                 }
             }
             if (items.size != manifest.count) throw FormatException("Die Indexierungsdatei ist unvollständig.")
+            if (manifest.format == FACES_FORMAT && items.sumOf { it.f.size } != manifest.faces) {
+                throw FormatException("Die Gesichter-Datei ist beschädigt.")
+            }
 
             if (zip.nextEntry?.name != "vectors.bin") throw FormatException("Die Indexierungsdatei ist beschädigt.")
             return Header(manifest, items)
@@ -102,6 +115,15 @@ object IndexImport {
             for (i in 0 until header.items.size) {
                 readFully(buffer)
                 onVector(i, buffer)
+            }
+        }
+
+        /** Face files: calls [onFaces] with the fp16 vectors of each photo's faces, in item order. */
+        inline fun readFaceVectors(header: Header, onFaces: (index: Int, vectors: List<ByteArray>) -> Unit) {
+            val dim = header.manifest.dim * 2
+            for ((i, item) in header.items.withIndex()) {
+                val vectors = List(item.f.size) { ByteArray(dim).also { readFully(it) } }
+                onFaces(i, vectors)
             }
         }
 

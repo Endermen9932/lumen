@@ -35,13 +35,25 @@ Pixel 10 Pro (Tensor G5, 16 GB RAM) – **ohne Google-Play-Dienste** und ohne Cl
 - „Fotos prüfen“: bis zu 50 unsichere Treffer im Tinder-Stil wischen (rechts = ja, links = nein, Rückgängig)
 - Suche nach Namen, auch kombiniert: „Paul“, „Paul Anna“, „Paul am Strand“
 - Personenbild frei wählbar („Bild ändern“ auf der Personenseite)
-- Mehrere Personen gleichzeitig auswählen (lang drücken oder „Alle auswählen“) und auf einmal ausblenden
+- Mehrere Personen gleichzeitig auswählen (lang drücken oder „Alle auswählen“) und auf einmal ausblenden oder zusammenführen
 - Namen hängen an der Person, nicht an der Datei – Komprimieren oder Neu-Scannen verliert nichts
 
-**KI-Indexierung am PC (Ubuntu 24.04)**
+**Suche mit Filtern**
+- Feste, kombinierbare Filter: **Datum (von/bis), Typ (Fotos/Videos/Screenshots), Ort, Personen** (alle zusammen oder
+  mindestens eine), **Album, Favoriten** – jeder Filter lässt sich von Hand einstellen
+- Aus dem Suchtext werden **Filtervorschläge**: „Sommer 2026“ → 1.6.2026 – 31.8.2026, „Weihnachten vor zwei Jahren“,
+  „März bis Mai 2024“, „seit 2020“, Personennamen, Orte, „Videos“, „Favoriten“ – ein Tipp setzt den Filter
+- Optional ein **Sprachmodell auf dem Handy** (Qwen 2.5 1.5B oder 0.5B, offline) für freiere Formulierungen
+  („Annas Hochzeit in München“). Es schlägt nur Werte für die festen Filter vor; jeder Vorschlag wird gegen die Anfrage geprüft
+- **Orte offline**: GPS aus EXIF/Video-Metadaten, zugeordnet zu 64.000 Orten (GeoNames, CC BY 4.0) mit deutschen Namen,
+  Regionen und Ländern – ohne Google-Dienste oder Internet
+
+**KI-Indexierung und Gesichter am PC (Ubuntu 24.04)**
 - Die Desktop-App **Lumen Indexer** (`.deb` bei jedem Release, Quellcode in [`desktop/`](desktop/README.md)) berechnet den
-  KI-Suchindex auf dem PC – mit allen sechs Modellen, allen CPU-Kernen und paralleler Bilddekodierung
-- Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren, **`.lumenindex`-Datei exportieren**
+  KI-Suchindex **und die Gesichtserkennung** auf dem PC – mit allen Modellen, allen CPU-Kernen oder einer **NVIDIA-GPU** (CUDA)
+- Qualität „Hoch“: größerer Gesichtsdetektor bzw. gespiegelte Zweitanalyse – im selben Vektorraum wie die Handy-Modelle,
+  daher analysiert das Handy neue Fotos weiter mit seinen eigenen Modellen
+- Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren, **`.lumenindex`-Dateien exportieren** (Speicherort frei wählbar)
 - In der App unter KI-Modelle → **Indexierung vom PC** importieren: Zuordnung über Dateiname + Größe, bereits
   indexierte Fotos bleiben unverändert, der Rest wird weiter auf dem Handy indexiert
 
@@ -49,6 +61,8 @@ Pixel 10 Pro (Tensor G5, 16 GB RAM) – **ohne Google-Play-Dienste** und ohne Cl
 - Inkrementelles Backup der ganzen Galerie in einen frei wählbaren Ordner (USB-Stick, SD-Karte,
   Nextcloud/NAS über den Android-Dateimanager), Ordnerstruktur bleibt erhalten
 - Optional jede Nacht automatisch beim Laden, Wiederherstellen fehlender Dateien mit einem Tipp
+- Entwicklermodus: Modelle, Index, Gesichter und Einstellungen in einen **frei wählbaren Ordner** sichern und aus jedem
+  Ordner wiederherstellen
 
 **KI-Suche – 100 % offline (ONNX Runtime)**
 

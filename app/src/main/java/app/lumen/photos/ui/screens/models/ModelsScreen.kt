@@ -437,8 +437,9 @@ private fun PcImportCard(status: ImportStatus?, onPick: () -> Unit) {
             } else {
                 Text(
                     "Kopiere die Fotos auf einen Ubuntu-PC, lass sie dort mit der Desktop-App „Lumen Indexer“ " +
-                        "analysieren und wähle hier die exportierte .lumenindex-Datei. Die Fotos auf dem Handy " +
-                        "werden über Dateiname und Größe zugeordnet – nichts muss neu berechnet werden.",
+                        "analysieren (KI-Suche und/oder Gesichter, auch mit NVIDIA-GPU) und wähle hier die exportierte " +
+                        ".lumenindex-Datei. Die Fotos auf dem Handy werden über Dateiname und Größe zugeordnet – nichts " +
+                        "muss neu berechnet werden, neue Fotos analysiert das Handy wie gewohnt weiter.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(12.dp))
@@ -460,6 +461,10 @@ private fun ImportResultDialog(status: ImportStatus, installed: Set<String>, act
             text = { Text(status.error ?: "Import fehlgeschlagen.") },
             confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } }
         )
+        return
+    }
+    if (result.isFaces) {
+        FaceImportResultDialog(result, onDismiss)
         return
     }
     val model = ModelCatalog.byId(result.modelId)
@@ -496,5 +501,48 @@ private fun ImportResultDialog(status: ImportStatus, installed: Set<String>, act
         dismissButton = if (model != null && modelReady && active != model.id) {
             { TextButton(onClick = onDismiss) { Text("Später") } }
         } else null
+    )
+}
+
+@Composable
+private fun FaceImportResultDialog(result: ImportResult, onDismiss: () -> Unit) {
+    val c = LocalContext.current.container
+    val scope = rememberCoroutineScope()
+    val active by c.faces.activeModel.collectAsStateWithLifecycle()
+    val model = app.lumen.photos.face.FaceModelCatalog.byId(result.modelId)
+    val isActive = model != null && active == model
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (result.imported > 0) "Gesichter importiert" else "Nichts zu importieren") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${Format.count(result.faces)} Gesichter aus ${Format.count(result.imported)} Fotos übernommen " +
+                        "(Gesichtserkennung ${model?.tier ?: result.modelId}). Die Datei enthielt ${Format.count(result.inFile)} Fotos."
+                )
+                if (result.alreadyIndexed > 0) Text("${Format.count(result.alreadyIndexed)} Fotos hatte das Handy schon gescannt – sie blieben unverändert.")
+                if (result.unmatched > 0) Text("${Format.count(result.unmatched)} Fotos waren nicht in der Datei – die scannt das Handy wie gewohnt selbst.")
+                if (result.imported == 0 && result.alreadyIndexed == 0) {
+                    Text("Es passte kein Foto: Dateiname und Größe müssen mit denen auf dem Handy übereinstimmen.")
+                }
+                if (model != null && !isActive) {
+                    Text("Aktiv ist gerade eine andere Erkennungsqualität. Wechsle zu „${model.tier}“, damit die Personen erscheinen – dafür muss das Modell auf dem Handy installiert sein, damit es neue Fotos weiter erkennt.")
+                }
+            }
+        },
+        confirmButton = {
+            if (model != null && !isActive) {
+                Button(onClick = {
+                    scope.launch { c.faces.setActiveModel(model) }
+                    if (model.id !in c.models.installed.value) c.ai.download(model)
+                    onDismiss()
+                }) { Text("${model.tier} verwenden") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("OK") }
+            }
+        },
+        dismissButton = if (model != null && !isActive) {
+            { TextButton(onClick = onDismiss) { Text("Später") } }
+        } else null,
     )
 }

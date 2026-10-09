@@ -116,6 +116,10 @@ jobs:
               Image.new('RGB', (800, 600), (40 * i, 90, 160)).save(f'$RUNNER_TEMP/photos/Camera/PXL_2024031{i}_120000.jpg')"
           lumen-indexer index "$RUNNER_TEMP/photos" -m mobileclip-s0 -o "$RUNNER_TEMP/index.lumenindex"
           lumen-indexer inspect "$RUNNER_TEMP/index.lumenindex" | grep -q "4 Einträge"
+          # Face detection with the smallest model and the large detector ("Hoch"), plus export.
+          lumen-indexer faces "$RUNNER_TEMP/photos" -m face-buffalo-s --hq -o "$RUNNER_TEMP/faces.lumenindex"
+          lumen-indexer inspect "$RUNNER_TEMP/faces.lumenindex" | grep -q "4 Einträge"
+          lumen-indexer gpu status
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
@@ -135,7 +139,8 @@ jobs:
             - Speicher optimieren: ganze Galerie auf Full HD skalieren, Qualitätsstufen mit Vorher/Nachher-Vorschau, Ultra HDR & EXIF bleiben erhalten
             - KI-Suche komplett offline (MobileCLIP / SigLIP 2, 6 Stufen von „Blitz“ bis „Maximum“)
             - Duplikate & ähnliche Serien, Erinnerungen, Editor, Video-Player, Papierkorb
-            - **Neu:** KI-Indexierung am PC – mit der Ubuntu-App „Lumen Indexer“ berechnen und in der App importieren (KI-Modelle → Indexierung vom PC)
+            - Suche mit festen, kombinierbaren Filtern (Datum, Typ, Ort, Personen, Album, Favoriten) – Vorschläge aus dem Suchtext per Regeln und optional per Sprachmodell (Qwen 2.5, offline)
+            - KI-Indexierung und Gesichtserkennung am PC – mit der Ubuntu-App „Lumen Indexer“ (auch auf NVIDIA-GPUs) berechnen und in der App importieren (KI-Modelle → Indexierung vom PC)
 
             **Dateien** (beide mit dem Android-Debug-Key signiert, lassen sich übereinander installieren):
             - `Lumen-v${{ steps.apk.outputs.version }}.apk` – optimierter Build (R8), empfohlen
@@ -145,7 +150,8 @@ jobs:
 
             **Lumen Indexer für Ubuntu 24.04** – `lumen-indexer_${{ steps.apk.outputs.version }}_amd64.deb`:
             `sudo apt install ./lumen-indexer_${{ steps.apk.outputs.version }}_amd64.deb`
-            Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren, `.lumenindex`-Datei exportieren und in Lumen importieren.
+            Fotos vom Handy auf den PC kopieren, Ordner wählen, indexieren (KI-Suche und/oder Gesichter), `.lumenindex`-Dateien exportieren und in Lumen importieren.
+            NVIDIA-GPU: im Programm unter „Leistung“ die CUDA-Laufzeit installieren (ca. 2,5 GB, nur NVIDIA-Treiber nötig).
 
             Build aus `main` @ ${{ env.RELEASE_SHA }} – enthält alle bisherigen Änderungen.
 

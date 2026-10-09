@@ -6,9 +6,9 @@ import sys
 import threading
 from pathlib import Path
 
-from . import APP_NAME, __version__, catalog
-from .exporter import default_filename, export_index, read_index
-from .indexer import Progress, run_index
+from . import APP_NAME, __version__, catalog, faces, gpu
+from .exporter import default_faces_filename, default_filename, export_faces, export_index, read_index
+from .indexer import Progress, run_index, store_key
 from .modelstore import Cancelled, ModelStore
 from .store import Store
 
@@ -70,7 +70,7 @@ def cmd_index(args) -> int:
 
     cancel = threading.Event()
     try:
-        summary = run_index(root, model, store, models, show, cancel, args.threads)
+        summary = run_index(root, model, store, models, show, cancel, args.threads, high_quality=args.hq, use_gpu=not args.cpu)
     except KeyboardInterrupt:
         cancel.set()
         print("\nAbgebrochen – der Fortschritt bleibt gespeichert.")
@@ -81,7 +81,7 @@ def cmd_index(args) -> int:
         out = Path(args.export)
         if out.is_dir():
             out = out / default_filename(model, root.name)
-        n = export_index(store, str(root.resolve()), model, out)
+        n = export_index(store, str(root.resolve()), model, out, key=store_key(model, args.hq))
         print(f"{n} Bilder exportiert nach {out}")
     return 0
 
@@ -92,8 +92,84 @@ def cmd_export(args) -> int:
     out = Path(args.output)
     if out.is_dir():
         out = out / default_filename(model, root.name)
-    n = export_index(Store(), str(root), model, out)
+    n = export_index(Store(), str(root), model, out, key=store_key(model, args.hq))
     print(f"{n} Bilder exportiert nach {out}")
+    return 0
+
+
+def _face_model(arg: str) -> faces.FaceModel:
+    m = faces.face_model(arg)
+    if m is None:
+        raise SystemExit(f"Unbekanntes Gesichtsmodell '{arg}'. Verfügbar: " + ", ".join(x.id for x in faces.FACE_MODELS))
+    return m
+
+
+def cmd_faces(args) -> int:
+    model = _face_model(args.model)
+    root = Path(args.folder).expanduser()
+    if not root.is_dir():
+        raise SystemExit(f"Ordner nicht gefunden: {root}")
+    fstore, store = faces.FaceModelStore(), Store()
+    if not fstore.is_installed(model, args.hq):
+        print(f"Lade {model.name} ({fstore.download_bytes(model, args.hq) / 1e6:,.0f} MB) …")
+        fstore.download(model, args.hq, lambda d, t: print(f"\r{d * 100 // max(t, 1)} %", end="", flush=True))
+        print()
+
+    def show(p: faces.FaceProgress) -> None:
+        if p.phase == "scan":
+            print(f"\rSuche Bilder … {p.found}", end="", flush=True)
+        elif p.phase == "load":
+            print(f"\n{p.total} neue Bilder – lade Modell …", end="", flush=True)
+        else:
+            print(f"\r{p.done}/{p.total} · {p.faces} Gesichter · {p.per_second:.1f} Bilder/s · noch ca. {_fmt_eta(p.eta_seconds)} · {p.device}   ", end="", flush=True)
+
+    cancel = threading.Event()
+    try:
+        s = faces.run_faces(root, model, args.hq, store, fstore, show, cancel, args.threads, use_gpu=not args.cpu)
+    except KeyboardInterrupt:
+        cancel.set()
+        print("\nAbgebrochen – der Fortschritt bleibt gespeichert.")
+        return 130
+    print(f"\nFertig: {s.newly_scanned} neu gescannt ({s.faces} Gesichter), {s.already_cached} aus dem Zwischenspeicher, "
+          f"{s.failed} nicht lesbar, {s.seconds:.0f} s.")
+    if args.export:
+        out = Path(args.export)
+        if out.is_dir():
+            out = out / default_faces_filename(model.id, root.name)
+        n, f = export_faces(store, str(root.resolve()), model, out)
+        print(f"{n} Bilder mit {f} Gesichtern exportiert nach {out}")
+    return 0
+
+
+def cmd_export_faces(args) -> int:
+    model = _face_model(args.model)
+    root = Path(args.folder).expanduser().resolve()
+    out = Path(args.output)
+    if out.is_dir():
+        out = out / default_faces_filename(model.id, root.name)
+    n, f = export_faces(Store(), str(root), model, out)
+    print(f"{n} Bilder mit {f} Gesichtern exportiert nach {out}")
+    return 0
+
+
+def cmd_gpu(args) -> int:
+    info = gpu.detect_nvidia()
+    if args.action == "status":
+        print(f"NVIDIA-GPU: {info.name + ' · Treiber ' + info.driver if info else 'keine gefunden'}")
+        flavor = gpu.installed_flavor()
+        print(f"GPU-Laufzeit: {flavor + (' (an)' if gpu.enabled() else ' (aus)') if flavor else 'nicht installiert'}")
+        from .engine import available_accelerator
+
+        print(f"Rechnet auf: {available_accelerator() or 'CPU'}")
+    elif args.action == "install":
+        f = gpu.install(print)
+        print(f"Installiert: {f.label}. Ab dem nächsten Start rechnet Lumen Indexer auf der GPU.")
+    elif args.action == "remove":
+        gpu.remove()
+        print("GPU-Laufzeit entfernt.")
+    else:
+        gpu.set_enabled(args.action == "on")
+        print("GPU " + ("eingeschaltet" if args.action == "on" else "ausgeschaltet"))
     return 0
 
 
@@ -120,12 +196,31 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-m", "--model", default=catalog.DEFAULT_MODEL_ID)
     p.add_argument("-t", "--threads", type=int)
     p.add_argument("-o", "--export", help="danach als .lumenindex exportieren (Datei oder Ordner)")
+    p.add_argument("--hq", action="store_true", help="Qualität „Hoch“: zusätzlich gespiegelt analysieren und mitteln")
+    p.add_argument("--cpu", action="store_true", help="keine GPU verwenden")
     p.set_defaults(fn=cmd_index)
     p = sub.add_parser("export", help="Indexierungsdatei aus dem Zwischenspeicher schreiben")
     p.add_argument("folder")
     p.add_argument("output")
     p.add_argument("-m", "--model", default=catalog.DEFAULT_MODEL_ID)
+    p.add_argument("--hq", action="store_true", help="die mit „Hoch“ berechneten Vektoren exportieren")
     p.set_defaults(fn=cmd_export)
+    p = sub.add_parser("faces", help="Gesichter erkennen")
+    p.add_argument("folder")
+    p.add_argument("-m", "--model", default=faces.DEFAULT_FACE_MODEL_ID)
+    p.add_argument("-t", "--threads", type=int)
+    p.add_argument("--hq", action="store_true", help="besserer Detektor (SCRFD 10G, 1024 px) – kompatibel zum Handy")
+    p.add_argument("--cpu", action="store_true", help="keine GPU verwenden")
+    p.add_argument("-o", "--export", help="danach exportieren (Datei oder Ordner)")
+    p.set_defaults(fn=cmd_faces)
+    p = sub.add_parser("export-faces", help="Gesichter aus dem Zwischenspeicher exportieren")
+    p.add_argument("folder")
+    p.add_argument("output")
+    p.add_argument("-m", "--model", default=faces.DEFAULT_FACE_MODEL_ID)
+    p.set_defaults(fn=cmd_export_faces)
+    p = sub.add_parser("gpu", help="NVIDIA-GPU-Beschleunigung (CUDA) verwalten")
+    p.add_argument("action", choices=["status", "install", "remove", "on", "off"])
+    p.set_defaults(fn=cmd_gpu)
     p = sub.add_parser("inspect", help="Indexierungsdatei ansehen")
     p.add_argument("file")
     p.set_defaults(fn=cmd_inspect)
@@ -139,6 +234,6 @@ def main(argv: list[str] | None = None) -> int:
         return args.fn(args)
     except Cancelled:
         return 130
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, gpu.InstallError) as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return 1

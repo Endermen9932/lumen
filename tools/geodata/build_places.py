@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Builds app/src/main/assets/places.tsv.gz – the offline place names for the "Ort" search filter.
+"""Builds app/src/main/assets/places.dat (gzip; not named .gz because the Android build unpacks such assets) – the offline place names for the "Ort" search filter.
 
 Data: GeoNames (https://www.geonames.org, CC BY 4.0). Download next to this script, then run it:
 
     curl -O https://download.geonames.org/export/dump/cities5000.zip \\
          -O https://download.geonames.org/export/dump/admin1CodesASCII.txt \\
          -O https://download.geonames.org/export/dump/alternateNamesV2.zip
-    python3 build_places.py <download dir> <repo>/app/src/main/assets/places.tsv.gz
+    python3 build_places.py <download dir> <repo>/app/src/main/assets/places.dat
 
 Output (UTF-8, tab separated, gzip):
     R <tab> CC.ADM1 <tab> region name (German if known)

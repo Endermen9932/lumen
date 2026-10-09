@@ -39,6 +39,23 @@ class IndexImportTest {
     }
 
     @Test
+    fun readsFacesWrittenByTheDesktopApp() {
+        IndexImport.Reader(javaClass.getResourceAsStream("/sample_faces.lumenindex")!!).use { reader ->
+            val header = reader.readHeader()
+            assertTrue(header.isFaces)
+            assertEquals("face-buffalo-l", header.manifest.modelId)
+            assertEquals(2, header.manifest.faces)
+            // Sorted by path: IMG_0001 (no faces) first.
+            assertEquals(0, header.items[0].f.size)
+            assertEquals(listOf(0.1f, 0.2f, 0.3f, 0.4f, 0.9f), header.items[1].f[0])
+            val faces = ArrayList<FloatArray>()
+            reader.readFaceVectors(header) { _, vectors -> vectors.forEach { faces += Fp16.decode(it) } }
+            assertEquals(2, faces.size)
+            assertArrayEquals(floatArrayOf(0f, 0.6f, 0.8f, 0f), faces[1], 1e-3f)
+        }
+    }
+
+    @Test
     fun rejectsOtherZipFiles() {
         val bytes = ByteArrayOutputStream().also { out ->
             ZipOutputStream(out).use { z ->

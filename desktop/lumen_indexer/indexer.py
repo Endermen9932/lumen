@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from .catalog import AiModel
 from .engine import Engine, cpu_threads
 from .exporter import encode_vector
@@ -42,6 +44,15 @@ class Summary:
 ProgressCb = Callable[[Progress], None]
 
 
+def store_key(model: AiModel, high_quality: bool) -> str:
+    """Cache key: "Hoch" vectors are kept apart from standard ones (both are exported as model.id)."""
+    return model.id + ("+tta" if high_quality else "")
+
+
+def _flip(images: list[np.ndarray]) -> list[np.ndarray]:
+    return [np.ascontiguousarray(im[:, ::-1]) for im in images]
+
+
 def run_index(
     root: Path,
     model: AiModel,
@@ -50,10 +61,16 @@ def run_index(
     on_progress: ProgressCb,
     cancel: threading.Event,
     threads: int | None = None,
+    high_quality: bool = False,
+    use_gpu: bool = True,
 ) -> Summary:
+    """[high_quality]: every photo is also analysed mirrored and both vectors are averaged
+    (test-time augmentation). Same model, same vector space as the phone – just a little more
+    robust, at twice the computing time."""
     started = time.monotonic()
     root = Path(root).resolve()
     key = str(root)
+    model_key = store_key(model, high_quality)
     prog = Progress()
 
     files = []
@@ -66,8 +83,8 @@ def run_index(
             return Summary(len(files), 0, 0, 0, True, time.monotonic() - started)
     prog.found = len(files)
 
-    known = store.known(key, model.id)
-    store.prune(key, model.id, {f[0] for f in files})
+    known = store.known(key, model_key)
+    store.prune(key, model_key, {f[0] for f in files})
     todo = [f for f in files if known.get(f[0], (None, None, False))[:2] != (f[2], f[3])]
     cached = len(files) - len(todo)
     prog.total = len(todo)
@@ -79,7 +96,7 @@ def run_index(
     prog.phase = "load"
     on_progress(prog)
     threads = threads or cpu_threads()
-    engine = Engine(model, models, threads)
+    engine = Engine(model, models, threads, use_gpu)
     prog.device = engine.device_label
     prog.phase = "run"
     on_progress(prog)
@@ -95,7 +112,7 @@ def run_index(
 
     def flush() -> None:
         if rows:
-            store.put_many(key, model.id, rows)
+            store.put_many(key, model_key, rows)
             rows.clear()
 
     def report(force: bool = False) -> None:
@@ -133,6 +150,9 @@ def run_index(
                         prog.done += 1
                 if images:
                     vectors = engine.embed(normalize_batch(images, model))
+                    if high_quality:
+                        vectors = vectors + engine.embed(normalize_batch(_flip(images), model))
+                        vectors /= np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-12)
                     for entry, vec in zip(ok, vectors):
                         rows.append((entry[0], entry[2], entry[3], encode_vector(vec)))
                         prog.done += 1

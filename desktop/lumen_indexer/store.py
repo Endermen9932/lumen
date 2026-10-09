@@ -19,6 +19,18 @@ CREATE TABLE IF NOT EXISTS vectors (
     vec   BLOB,
     PRIMARY KEY (root, model, rel)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS faces (
+    root    TEXT NOT NULL,
+    model   TEXT NOT NULL,
+    rel     TEXT NOT NULL,
+    size    INTEGER NOT NULL,
+    mtime   INTEGER NOT NULL,
+    variant TEXT NOT NULL,
+    n       INTEGER NOT NULL,   -- number of faces, -1 = file could not be read
+    boxes   BLOB NOT NULL,      -- n x (left, top, right, bottom, score) float32 LE, normalised
+    vecs    BLOB NOT NULL,      -- n x dim fp16 LE, L2-normalised
+    PRIMARY KEY (root, model, rel)
+) WITHOUT ROWID;
 """
 
 
@@ -71,6 +83,38 @@ class Store:
         with self._conn() as c:
             c.execute("DELETE FROM vectors WHERE root=? AND model=?", (root, model))
 
+    # ------------------------------------------------------------------ faces
+
+    def face_known(self, root: str, model: str) -> dict[str, tuple[int, int, str]]:
+        """rel -> (size, mtime, variant)."""
+        with self._conn() as c:
+            rows = c.execute("SELECT rel, size, mtime, variant FROM faces WHERE root=? AND model=?", (root, model))
+            return {rel: (size, mtime, variant) for rel, size, mtime, variant in rows}
+
+    def face_put_many(self, root: str, model: str, rows) -> None:
+        with self._conn() as c:
+            c.executemany(
+                "INSERT OR REPLACE INTO faces (root, model, rel, size, mtime, variant, n, boxes, vecs) VALUES (?,?,?,?,?,?,?,?,?)",
+                [(root, model, *r) for r in rows],
+            )
+
+    def face_prune(self, root: str, model: str, present: set[str]) -> int:
+        stale = [rel for rel in self.face_known(root, model) if rel not in present]
+        with self._conn() as c:
+            for i in range(0, len(stale), 500):
+                chunk = stale[i:i + 500]
+                c.execute(
+                    f"DELETE FROM faces WHERE root=? AND model=? AND rel IN ({','.join('?' * len(chunk))})",
+                    (root, model, *chunk),
+                )
+        return len(stale)
+
+    def face_counts(self, root: str, model: str) -> tuple[int, int]:
+        """(scanned photos, faces)."""
+        with self._conn() as c:
+            row = c.execute("SELECT COUNT(*), COALESCE(SUM(n), 0) FROM faces WHERE root=? AND model=? AND n >= 0", (root, model)).fetchone()
+            return int(row[0]), int(row[1])
+
     @contextmanager
     def snapshot(self) -> Iterator["Snapshot"]:
         """A consistent read-only view, used by the exporter for its two passes over the rows."""
@@ -98,3 +142,8 @@ class Snapshot:
     def vectors(self, root: str, model: str) -> Iterator[bytes]:
         for (vec,) in self._c.execute("SELECT vec FROM vectors WHERE root=? AND model=? AND vec IS NOT NULL ORDER BY rel", (root, model)):
             yield vec
+
+    def face_rows(self, root: str, model: str) -> Iterator[tuple[str, int, int, int, bytes, bytes]]:
+        yield from self._c.execute(
+            "SELECT rel, size, mtime, n, boxes, vecs FROM faces WHERE root=? AND model=? AND n >= 0 ORDER BY rel", (root, model)
+        )

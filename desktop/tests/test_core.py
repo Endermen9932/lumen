@@ -140,7 +140,7 @@ def test_normalize_matches_the_android_formula():
 class FakeEngine:
     created = 0
 
-    def __init__(self, model, store, threads=None):
+    def __init__(self, model, store, threads=None, use_gpu=True):
         FakeEngine.created += 1
         self.model, self.batch_size, self.accelerated, self.device_label = model, 1, False, "Test"
 
@@ -188,6 +188,20 @@ def test_index_run_is_resumable_and_incremental(tmp_path, monkeypatch, small_mod
     assert store.count(key, small_model.id) == 5  # +1 new, -1 removed
 
 
+def test_high_quality_vectors_are_cached_separately(tmp_path, monkeypatch, small_model):
+    monkeypatch.setattr(indexer, "Engine", FakeEngine)
+    root = tmp_path / "photos"
+    _photos(root, 3)
+    store = Store(tmp_path / "c.db")
+    s = indexer.run_index(root, small_model, store, ModelStore(tmp_path / "m"), lambda p: None, threading.Event(), 2, high_quality=True)
+    assert s.newly_indexed == 3
+    key = str(root.resolve())
+    assert store.count(key, small_model.id) == 0
+    assert store.count(key, indexer.store_key(small_model, True)) == 3
+    n = exporter.export_index(store, key, small_model, tmp_path / "x.lumenindex", key=indexer.store_key(small_model, True))
+    assert n == 3 and exporter.read_index(tmp_path / "x.lumenindex").manifest["modelId"] == small_model.id
+
+
 def test_cancel_keeps_progress(tmp_path, monkeypatch, small_model):
     root = tmp_path / "photos"
     _photos(root, 8)
@@ -212,3 +226,66 @@ def test_cancel_keeps_progress(tmp_path, monkeypatch, small_model):
     monkeypatch.setattr(indexer, "Engine", FakeEngine)
     s2 = _run(root, small_model, store)
     assert not s2.cancelled and s2.newly_indexed == 8 - done
+
+
+# ---------------------------------------------------------------- faces
+def _kotlin_face_models():
+    src = (REPO / "app/src/main/java/app/lumen/photos/face/FaceModelCatalog.kt").read_text(encoding="utf-8")
+    out = {}
+    for block in re.split(r"\n\s*FaceModel\(", src)[1:]:
+        g = lambda pat: re.search(pat, block).group(1)  # noqa: E731
+        sizes = [int(x.replace("_", "")) for x in re.findall(r'ModelFile\("[^"]+", ([\d_]+)', block)]
+        out[g(r'id = "([^"]+)"')] = dict(repo=g(r'repo = "([^"]+)"'), sizes=sizes)
+    return out
+
+
+@pytest.mark.skipif(not (REPO / "app").is_dir(), reason="needs the repository checkout")
+def test_face_catalog_matches_the_android_app():
+    from lumen_indexer import faces
+
+    kotlin = _kotlin_face_models()
+    assert [m.id for m in faces.FACE_MODELS] == list(kotlin)
+    for m in faces.FACE_MODELS:
+        assert m.repo == kotlin[m.id]["repo"]
+        assert [f.size for f in m.files] == kotlin[m.id]["sizes"]
+
+
+def test_face_export_roundtrip(tmp_path):
+    from lumen_indexer import faces
+
+    model = dataclasses.replace(faces.FACE_MODELS[0], dim=8)
+    store = Store(tmp_path / "c.db")
+    f1 = faces.Face((0.1, 0.2, 0.3, 0.4), 0.9, _vec(8, 1))
+    f2 = faces.Face((0.5, 0.5, 0.7, 0.8), 0.8, _vec(8, 2))
+    rows = []
+    for rel, fl in [("Camera/a.jpg", [f1, f2]), ("Camera/none.jpg", []), ("b.jpg", [f2])]:
+        boxes, vecs = faces.encode_faces(fl)
+        rows.append((rel, 100, 5, "std", len(fl), boxes, vecs))
+    rows.append(("broken.jpg", 1, 1, "std", -1, b"", b""))
+    store.face_put_many("/r", model.id, rows)
+    assert store.face_counts("/r", model.id) == (3, 3)
+
+    n, f = exporter.export_faces(store, "/r", model, tmp_path / "f.lumenindex")
+    assert (n, f) == (3, 3)
+    idx = exporter.read_index(tmp_path / "f.lumenindex")
+    assert idx.manifest["format"] == "lumen-faces" and idx.manifest["faces"] == 3
+    assert [(i["p"], i["n"], len(i["f"])) for i in idx.items] == [("Camera", "a.jpg", 2), ("Camera", "none.jpg", 0), ("", "b.jpg", 1)]
+    assert np.allclose(idx.items[0]["f"][1], [0.5, 0.5, 0.7, 0.8, 0.8], atol=1e-5)
+    assert np.allclose(idx.vectors[1], f2.vector, atol=1e-3) and np.allclose(idx.vectors[2], f2.vector, atol=1e-3)
+
+
+FACE_DIR = Path(__import__("os").environ.get("LUMEN_FACE_TEST_DIR", "/nonexistent"))
+
+
+@pytest.mark.skipif(not FACE_DIR.is_dir(), reason="set LUMEN_FACE_TEST_DIR (models/ + t1.jpg) to run")
+def test_real_faces_are_found_and_hq_stays_compatible():
+    from lumen_indexer import faces
+    from lumen_indexer.modelstore import ModelStore
+
+    store = faces.FaceModelStore(ModelStore(FACE_DIR / "models"))
+    m = faces.face_model("face-buffalo-s")
+    std = faces.FaceEngine(m, store, False, 2, use_gpu=False).analyse(faces.load_for_faces(str(FACE_DIR / "t1.jpg"), False))
+    hq = faces.FaceEngine(m, store, True, 2, use_gpu=False).analyse(faces.load_for_faces(str(FACE_DIR / "t1.jpg"), True))
+    assert len(std) == 6 and len(hq) == 6
+    for a in std:
+        assert max(float(a.vector @ b.vector) for b in hq) > 0.85
