@@ -173,6 +173,8 @@ class SearchIndex(private val dao: EmbeddingDao) {
         minResults: Int = 12,
         maxResults: Int = 800,
         exclude: Long? = null,
+        /** Only these media may be returned (search filters); the cut-off still uses all scores. */
+        allowed: Set<Long>? = null,
     ): List<ScoredId> {
         val (allIds, scores) = scoreAll(query)
         if (scores.isEmpty()) return emptyList()
@@ -188,6 +190,7 @@ class SearchIndex(private val dao: EmbeddingDao) {
         val result = ArrayList<ScoredId>()
         for (i in order) {
             if (allIds[i] == exclude) continue
+            if (allowed != null && allIds[i] !in allowed) continue
             if (result.size >= maxResults) break
             if (result.size >= minResults && scores[i] < threshold) break
             result += ScoredId(allIds[i], scores[i])

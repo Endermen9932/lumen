@@ -49,7 +49,7 @@ class ModelManager(private val context: Context) {
 
     fun diskUsage(model: DownloadableModel): Long = dir(model).listFiles()?.sumOf { it.length() } ?: 0L
 
-    private fun scanInstalled(): Set<String> = (ModelCatalog.models + FaceModelCatalog.models).filter { isInstalled(it) }.map { it.id }.toSet()
+    private fun scanInstalled(): Set<String> = (ModelCatalog.models + FaceModelCatalog.models + app.lumen.photos.llm.LlmCatalog.models).filter { isInstalled(it) }.map { it.id }.toSet()
 
     fun refresh() {
         _installed.value = scanInstalled()

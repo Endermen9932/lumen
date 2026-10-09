@@ -350,6 +350,23 @@ class AiRepository(
     }
 
     /**
+     * Text search inside the media that pass the search filters ([allowed]): the same adaptive
+     * cut-off as the normal search, so "Strand" + "Sommer 2026" shows beach photos of that
+     * summer – not every photo of the summer.
+     */
+    suspend fun searchFiltered(query: String, allowed: Set<Long>, label: String): SearchResult? {
+        val model = activeModel.value ?: return null
+        if (!models.isInstalled(model) || query.isBlank()) return null
+        val start = System.currentTimeMillis()
+        index.ensureLoaded(model.id)
+        val vector = textEmbedding(model, query)
+        val scored = withContext(Dispatchers.Default) {
+            index.search(vector, settings.current.searchStrictness, minResults = 6, allowed = allowed)
+        }
+        return toResult(label, scored, start)
+    }
+
+    /**
      * Search restricted to [allowed] media (e.g. all photos of "Paul"). Without an AI model or with
      * an empty [query] the photos are simply returned newest first.
      */

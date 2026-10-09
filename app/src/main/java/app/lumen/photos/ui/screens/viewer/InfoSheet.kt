@@ -117,7 +117,14 @@ fun InfoSheet(item: MediaItem, onDismiss: () -> Unit) {
                     }
                 }
                 e.latLong?.let { (lat, lon) ->
-                    InfoRow(Icons.Outlined.Place, String.format(Locale.US, "%.5f, %.5f", lat, lon), "Aufnahmeort")
+                    val c = context.container
+                    val place = remember(lat, lon) {
+                        c.locations.directory.takeIf { it.loaded }?.nearest(lat, lon)?.let { city ->
+                            listOfNotNull(city.name, c.locations.directory.regionName(city.region), c.locations.directory.countryName(city.country))
+                                .distinct().joinToString(", ")
+                        }
+                    }
+                    InfoRow(Icons.Outlined.Place, place ?: String.format(Locale.US, "%.5f, %.5f", lat, lon), if (place != null) String.format(Locale.US, "%.5f, %.5f", lat, lon) else "Aufnahmeort")
                     TextButton(
                         onClick = {
                             runCatching {

@@ -179,6 +179,10 @@ fun ModelsScreen() {
                 Text("Gesichtserkennung (Personen)", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp))
                 app.lumen.photos.ui.screens.people.FaceModelsSection()
             }
+            item {
+                Text("KI-Filtervorschläge (Sprachmodell)", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp))
+                LlmModelsSection()
+            }
         }
     }
 

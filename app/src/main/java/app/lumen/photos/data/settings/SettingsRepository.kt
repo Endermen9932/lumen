@@ -89,6 +89,8 @@ data class AppSettings(
     val backGestureAnimations: Boolean = true,
     val activeModelId: String? = null,
     val activeFaceModelId: String? = null,
+    /** Language model for search filter suggestions; null = off. */
+    val llmModelId: String? = null,
     val aiThreads: Int = 6,
     val useXnnpack: Boolean = false,
     val indexOnlyWhileCharging: Boolean = false,

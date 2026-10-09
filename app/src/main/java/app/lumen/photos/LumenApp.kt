@@ -7,6 +7,8 @@ import app.lumen.photos.ai.ModelManager
 import app.lumen.photos.ai.SearchIndex
 import app.lumen.photos.data.backup.DevBackup
 import app.lumen.photos.data.db.LumenDatabase
+import app.lumen.photos.data.location.LocationRepository
+import app.lumen.photos.llm.LlmRepository
 import app.lumen.photos.data.media.MediaRepository
 import app.lumen.photos.data.settings.SettingsRepository
 import app.lumen.photos.face.FaceRepository
@@ -50,6 +52,8 @@ class AppContainer(context: Context) {
     val videoCompressor = VideoCompressor(context, db.optimized())
     val faces = FaceRepository(context, db.faces(), settings, models, media, scope)
     val lists = MediaListRegistry()
+    val locations = LocationRepository(context, db.locations(), media, scope)
+    val llm = LlmRepository(settings, models, scope)
     val devBackup = DevBackup(context, this)
 }
 
@@ -65,6 +69,7 @@ class LumenApp : Application(), SingletonImageLoader.Factory {
         Notifications.createChannels(this)
         container.ai.start()
         container.faces.start()
+        container.locations.start()
         container.devBackup.start(restored)
         // Coming back to the app restarts indexing jobs Android interrupted in the background.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

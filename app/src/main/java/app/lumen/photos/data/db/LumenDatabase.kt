@@ -242,19 +242,44 @@ interface FaceDao {
     suspend fun moveRejections(from: Long, to: Long)
 }
 
+// ---------------------------------------------------------------- Locations
+
+/** GPS position of a photo or video (null if it has none), for the "Ort" search filter. */
+@Entity(tableName = "media_locations", primaryKeys = ["mediaId"])
+data class MediaLocationEntity(
+    val mediaId: Long,
+    val dateModified: Long,
+    val lat: Double?,
+    val lon: Double?,
+)
+
+@Dao
+interface LocationDao {
+    @Query("SELECT * FROM media_locations")
+    suspend fun all(): List<MediaLocationEntity>
+
+    @Upsert
+    suspend fun upsert(items: List<MediaLocationEntity>)
+
+    @Query("DELETE FROM media_locations WHERE mediaId IN (:ids)")
+    suspend fun delete(ids: List<Long>)
+}
+
 @Database(
     entities = [
         EmbeddingEntity::class, OptimizedEntity::class,
         FaceEntity::class, FaceScanEntity::class, PersonEntity::class, FaceRejectionEntity::class,
+        MediaLocationEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class LumenDatabase : RoomDatabase() {
     abstract fun embeddings(): EmbeddingDao
     abstract fun optimized(): OptimizedDao
     abstract fun faces(): FaceDao
+    abstract fun locations(): LocationDao
 
     companion object {
         fun create(context: Context): LumenDatabase =

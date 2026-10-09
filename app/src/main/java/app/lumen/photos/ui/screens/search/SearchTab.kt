@@ -49,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -69,17 +70,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.lumen.photos.AppContainer
 import app.lumen.photos.MediaListRegistry
-import app.lumen.photos.ai.DateQueryParser
-import app.lumen.photos.ai.SearchResult
 import app.lumen.photos.container
 import app.lumen.photos.work.BackgroundJobs
-import app.lumen.photos.data.media.Album
 import app.lumen.photos.data.media.MediaItem
 import app.lumen.photos.ui.components.Format
 import app.lumen.photos.ui.components.Grouping
@@ -88,16 +83,6 @@ import app.lumen.photos.ui.components.MediaThumbnail
 import app.lumen.photos.ui.components.SelectionBar
 import app.lumen.photos.ui.components.ShapeIcon
 import app.lumen.photos.ui.navigation.LocalNavigator
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-
-data class Concept(val label: String, val prompt: String)
 
 private val conceptsDe = listOf(
     Concept("Strand", "ein Strand am Meer"), Concept("Berge", "Berge und Landschaft"),
@@ -120,85 +105,7 @@ private val conceptsEn = listOf(
     Concept("Party", "a party with friends"), Concept("Kinder", "children playing"),
 )
 
-class SearchViewModel(private val c: AppContainer) : ViewModel() {
-    private val _query = MutableStateFlow("")
-    val query = _query.asStateFlow()
-    private val _result = MutableStateFlow<SearchResult?>(null)
-    val result = _result.asStateFlow()
-    private val _loading = MutableStateFlow(false)
-    val loading = _loading.asStateFlow()
-    private val _albums = MutableStateFlow<List<Album>>(emptyList())
-    val albums = _albums.asStateFlow()
-    private val _explore = MutableStateFlow<List<Pair<Concept, MediaItem>>>(emptyList())
-    val explore = _explore.asStateFlow()
-    /** The date the query was understood as (e.g. "Juli 2023"), shown above the results. */
-    private val _dateLabel = MutableStateFlow<String?>(null)
-    val dateLabel = _dateLabel.asStateFlow()
-    private var job: Job? = null
-    private var exploreModel: String? = null
-    private var exploreSize = -1
-
-    init {
-        c.ai.warmUp()
-    }
-
-    @OptIn(FlowPreview::class)
-    fun setQuery(q: String, immediate: Boolean = false) {
-        _query.value = q
-        job?.cancel()
-        if (q.isBlank()) {
-            _result.value = null
-            _albums.value = emptyList()
-            _dateLabel.value = null
-            _loading.value = false
-            return
-        }
-        job = viewModelScope.launch {
-            if (!immediate) delay(380)
-            _loading.value = true
-            val lower = q.trim().lowercase()
-            _albums.value = c.media.albums.value.filter { it.name.lowercase().contains(lower) }
-            val (people, afterPeople) = c.faces.matchQuery(q)
-            val date = DateQueryParser.parse(afterPeople)
-            _dateLabel.value = date.filter?.label
-            _result.value = runCatching {
-                // Named persons and a date narrow the search down; the remaining words rank the rest.
-                // "Paul Anna" = photos with both, "Strand Juli 2023" = beach photos from July 2023.
-                var allowed: Set<Long>? = people.takeIf { it.isNotEmpty() }
-                    ?.map { it.mediaIds.toSet() }?.reduce { a, b -> a intersect b }
-                date.filter?.let { filter ->
-                    val onDate = withContext(Dispatchers.Default) {
-                        c.media.media.value.filter { filter.matches(Format.localDate(it.timestamp)) }.mapTo(HashSet()) { it.id }
-                    }
-                    allowed = allowed?.let { it intersect onDate } ?: onDate
-                }
-                val ids = allowed
-                if (ids != null) c.ai.searchWithin(date.rest, ids, q) else c.ai.search(q)
-            }.getOrNull()
-            _loading.value = false
-        }
-    }
-
-    fun loadExplore() {
-        val model = c.ai.activeModel.value ?: return
-        val size = c.index.size.value
-        if (size < 20 || (exploreModel == model.id && kotlin.math.abs(size - exploreSize) < 50)) return
-        exploreModel = model.id
-        exploreSize = size
-        viewModelScope.launch {
-            val concepts = if (model.multilingual) conceptsDe else conceptsEn
-            val out = ArrayList<Pair<Concept, MediaItem>>()
-            val used = HashSet<Long>()
-            for (concept in concepts) {
-                val hit = runCatching { c.ai.bestMatch(concept.prompt) }.getOrNull() ?: continue
-                if (used.add(hit.id)) {
-                    out += concept to hit
-                    _explore.value = out.toList()
-                }
-            }
-        }
-    }
-}
+fun concepts(multilingual: Boolean) = if (multilingual) conceptsDe else conceptsEn
 
 @Composable
 fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
@@ -207,11 +114,14 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
     val nav = LocalNavigator.current
     val vm: SearchViewModel = viewModel { SearchViewModel(context.container) }
     val query by vm.query.collectAsStateWithLifecycle()
+    val filters by vm.filters.collectAsStateWithLifecycle()
+    val suggestions by vm.suggestions.collectAsStateWithLifecycle()
+    val aiThinking by vm.aiThinking.collectAsStateWithLifecycle()
+    val needsModel by vm.needsModel.collectAsStateWithLifecycle()
     val result by vm.result.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val albums by vm.albums.collectAsStateWithLifecycle()
     val explore by vm.explore.collectAsStateWithLifecycle()
-    val dateLabel by vm.dateLabel.collectAsStateWithLifecycle()
     val model by c.ai.activeModel.collectAsStateWithLifecycle()
     val installed by c.models.installed.collectAsStateWithLifecycle()
     val indexed by c.ai.indexedCount.collectAsStateWithLifecycle()
@@ -224,12 +134,13 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
     val focusManager = LocalFocusManager.current
     val persons by c.faces.persons.collectAsStateWithLifecycle()
     val namedPersons = remember(persons) { persons.filter { it.name != null && !it.hidden } }
-    val ready = (model != null && model!!.id in installed) || namedPersons.isNotEmpty()
+    val aiReady = model != null && model!!.id in installed
+    val searching = query.isNotBlank() || !filters.isEmpty
 
-    LaunchedEffect(indexSize, ready) { if (ready) vm.loadExplore() }
+    LaunchedEffect(indexSize, aiReady) { if (aiReady) vm.loadExplore(::concepts) }
     LaunchedEffect(selection.isNotEmpty()) { onSelectionModeChange(selection.isNotEmpty()) }
     BackHandler(enabled = selection.isNotEmpty()) { selection = emptySet() }
-    BackHandler(enabled = query.isNotEmpty() && selection.isEmpty()) { vm.setQuery("") }
+    BackHandler(enabled = searching && selection.isEmpty()) { vm.clear() }
 
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
@@ -248,10 +159,10 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
                     value = query,
                     onValueChange = { vm.setQuery(it) },
                     placeholder = {
-                        Text(if (model?.multilingual == false) "Suche auf Englisch, z. B. „dog on the beach“ oder „march 2024“" else "Suche nach Inhalten, Personen, Datum …")
+                        Text(if (model?.multilingual == false) "Suche auf Englisch, z. B. „dog on the beach“" else "Suche nach Inhalten, Personen, Orten, Datum …")
                     },
                     leadingIcon = {
-                        if (query.isNotEmpty()) IconButton(onClick = { vm.setQuery(""); focusManager.clearFocus() }) {
+                        if (searching) IconButton(onClick = { vm.clear(); focusManager.clearFocus() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück")
                         } else Icon(Icons.Outlined.Search, null)
                     },
@@ -277,7 +188,19 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
             }
         }
 
-        AnimatedVisibility(progress != null && ready) {
+        // Filters: fixed rules, set by hand or from a suggestion.
+        FilterBar(filters, onFiltersChange = vm::setFilters, modifier = Modifier.padding(bottom = 4.dp))
+        AnimatedVisibility(suggestions.isNotEmpty() || aiThinking) {
+            SuggestionRow(
+                suggestions = suggestions,
+                thinking = aiThinking,
+                onApply = vm::apply,
+                onApplyAll = vm::applyAll,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+
+        AnimatedVisibility(progress != null && aiReady) {
             val p = progress
             if (p != null) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
@@ -302,10 +225,9 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
         Box(Modifier.weight(1f)) {
             AnimatedContent(
                 targetState = when {
-                    query.isBlank() -> if (ready) 1 else 0
-                    // Without an AI model only searches by date or person can have results.
-                    !ready && result == null && !loading -> 0
-                    else -> 2
+                    searching -> 2
+                    aiReady || namedPersons.isNotEmpty() -> 1
+                    else -> 0
                 },
                 transitionSpec = { fadeIn().togetherWith(fadeOut()) },
                 label = "search-content"
@@ -314,14 +236,14 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
                     0 -> SetupHint(onSetup = { nav.models() })
                     1 -> ExploreGrid(
                         persons = namedPersons,
-                        onPerson = { vm.setQuery(it, immediate = true) },
+                        onPerson = { p -> vm.updateFilters { it.copy(persons = it.persons + p.id) } },
                         explore = explore,
                         indexed = indexed,
                         total = media.size,
                         multilingual = model?.multilingual == true,
                         bottomPadding = bottom + 96.dp,
                         onConcept = { vm.setQuery(if (model?.multilingual == true) it.label else it.prompt, immediate = true) },
-                        onSuggestion = { vm.setQuery(it, immediate = true) },
+                        onSuggestion = { vm.quickSearch(it) },
                     )
                     else -> {
                         val r = result
@@ -336,7 +258,22 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
                                     ShapeIcon(Icons.Outlined.SearchOff, size = 88.dp, shape = MaterialShapes.Cookie7Sided.toShape())
                                     Spacer(Modifier.height(16.dp))
                                     Text("Keine Treffer", style = MaterialTheme.typography.titleLarge)
-                                    if (indexed == 0) Text("Die KI-Indexierung läuft noch.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    when {
+                                        needsModel -> {
+                                            Text(
+                                                "Für die Suche nach Bildinhalten braucht Lumen ein KI-Modell. Filter funktionieren auch ohne.",
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            )
+                                            TextButton(onClick = { nav.models() }) { Text("KI-Modell wählen") }
+                                        }
+                                        suggestions.isNotEmpty() -> Text(
+                                            "Tipp: Tippe oben auf einen Vorschlag, um ihn als Filter zu setzen.",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        )
+                                        indexed == 0 && query.isNotBlank() -> Text("Die KI-Indexierung läuft noch.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                             else -> MediaGrid(
@@ -349,7 +286,7 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
                                     val key = c.lists.register("search:${r.query}", r.items)
                                     nav.viewer(key, item.id)
                                 },
-                                grouping = Grouping.NONE,
+                                grouping = if (query.isBlank()) Grouping.AUTO else Grouping.NONE,
                                 contentPadding = PaddingValues(bottom = bottom + 96.dp),
                                 header = {
                                     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -370,8 +307,9 @@ fun SearchTab(onSelectionModeChange: (Boolean) -> Unit) {
                                             }
                                         }
                                         Text(
-                                            (dateLabel?.let { "$it · " } ?: "") +
-                                                "${Format.count(r.items.size)} Treffer · ${r.tookMs} ms · ${Format.count(r.indexedCount)} Fotos durchsucht",
+                                            "${Format.count(r.items.size)} Treffer" +
+                                                (if (query.isNotBlank() && r.tookMs > 0) " · ${r.tookMs} ms · ${Format.count(r.indexedCount)} Fotos durchsucht" else "") +
+                                                (if (!filters.isEmpty) " · ${filters.count} Filter" else ""),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -415,7 +353,7 @@ private fun SetupHint(onSetup: () -> Unit) {
 @Composable
 private fun ExploreGrid(
     persons: List<app.lumen.photos.face.Person>,
-    onPerson: (String) -> Unit,
+    onPerson: (app.lumen.photos.face.Person) -> Unit,
     explore: List<Pair<Concept, MediaItem>>,
     indexed: Int,
     total: Int,
@@ -425,7 +363,7 @@ private fun ExploreGrid(
     onSuggestion: (String) -> Unit,
 ) {
     val suggestions = if (multilingual) {
-        listOf("Hund im Schnee", "Sonnenuntergang am Meer", "Geburtstagstorte", "Rotes Auto", "Menschen lachen", "Quittung", "Berggipfel", "Essen im Restaurant", "Gestern", "Letzter Monat")
+        listOf("Hund im Schnee", "Sonnenuntergang am Meer", "Geburtstagstorte", "Rotes Auto", "Menschen lachen", "Quittung", "Berggipfel", "Essen im Restaurant", "Gestern", "Letzter Monat", "Sommer ${java.time.LocalDate.now().year - 1}", "Videos")
     } else {
         listOf("dog in the snow", "sunset over the sea", "birthday cake", "red car", "people laughing", "receipt", "mountain peak", "food in a restaurant", "yesterday", "last month")
     }
@@ -443,7 +381,7 @@ private fun ExploreGrid(
                     androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.padding(bottom = 14.dp)) {
                         items(persons.size) { i ->
                             val p = persons[i]
-                            app.lumen.photos.ui.screens.people.PersonCard(p, Modifier.width(78.dp)) { onPerson(p.name!!) }
+                            app.lumen.photos.ui.screens.people.PersonCard(p, Modifier.width(78.dp)) { onPerson(p) }
                         }
                     }
                 }

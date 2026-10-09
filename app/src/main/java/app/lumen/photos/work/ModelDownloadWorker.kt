@@ -11,6 +11,8 @@ import app.lumen.photos.ai.ModelCatalog
 import app.lumen.photos.face.FaceModelCatalog
 import app.lumen.photos.face.FaceModel
 import app.lumen.photos.ai.AiModel
+import app.lumen.photos.llm.LlmCatalog
+import app.lumen.photos.llm.LlmModel
 
 /** Downloads the weights of one model once. Afterwards everything runs offline. */
 class ModelDownloadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -18,9 +20,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
     override suspend fun doWork(): Result {
         val c = (applicationContext as LumenApp).container
         val modelId = inputData.getString(KEY_MODEL)
-        val model: app.lumen.photos.ai.DownloadableModel = ModelCatalog.byId(modelId) ?: FaceModelCatalog.byId(modelId) ?: return Result.failure()
+        val model: app.lumen.photos.ai.DownloadableModel = ModelCatalog.byId(modelId) ?: FaceModelCatalog.byId(modelId) ?: LlmCatalog.byId(modelId) ?: return Result.failure()
         val cancel = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
-        val title = "Lade " + when (model) { is AiModel -> model.name; is FaceModel -> "Gesichtserkennung ${model.tier}"; else -> "Modell" }
+        val title = "Lade " + when (model) { is AiModel -> model.name; is FaceModel -> "Gesichtserkennung ${model.tier}"; is LlmModel -> "Sprachmodell ${model.tier}"; else -> "Modell" }
         safeForeground(Notifications.progress(applicationContext, Notifications.ID_DOWNLOAD, title, "Verbinde …", 0, 0, cancel, dataSync = true))
         var lastUi = 0L
         return try {
@@ -51,6 +53,9 @@ class ModelDownloadWorker(context: Context, params: WorkerParameters) : Coroutin
                         c.faces.setActiveModel(model)
                     }
                     c.faces.schedule()
+                }
+                is LlmModel -> {
+                    if (c.settings.current.llmModelId == null) c.llm.setActive(model)
                 }
             }
             Result.success()
